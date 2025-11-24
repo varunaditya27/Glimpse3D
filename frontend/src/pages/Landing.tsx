@@ -65,7 +65,7 @@ export const Landing = () => {
                             <Button
                                 variant="outline"
                                 size="lg"
-                                onClick={() => window.open('https://github.com/your-org/glimpse3d', '_blank')}
+                                onClick={() => window.open('https://github.com/varunaditya27/Glimpse3D', '_blank')}
                                 style={{ backdropFilter: 'blur(10px)' }}
                             >
                                 View on GitHub

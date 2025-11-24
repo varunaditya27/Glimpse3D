@@ -111,8 +111,8 @@ Glimpse3D/
 ## **1. Clone the repo**
 
 ```
-$ git clone https://github.com/your-org/glimpse3d
-$ cd glimpse3d
+$ git clone https://github.com/varunaditya27/Glimpse3D.git
+$ cd Glimpse3D
 ```
 
 ## **2. Download Models**
