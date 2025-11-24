@@ -1,0 +1,5 @@
+# Prompt Templates for SDXL Enhancement
+
+default: "high quality, 8k resolution, detailed texture, photorealistic"
+product: "studio lighting, clean background, sharp focus, product photography"
+character: "detailed skin texture, realistic eyes, subsurface scattering"
