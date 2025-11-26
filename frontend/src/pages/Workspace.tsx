@@ -28,6 +28,16 @@ export const Workspace = () => {
     const [progress, setProgress] = useState(0);
     const [statusText, setStatusText] = useState('');
 
+    // Material State
+    const [material, setMaterial] = useState({
+        color: '#D4A857',
+        roughness: 0.2,
+        metalness: 0.9,
+        emissive: 0,
+        wireframe: false,
+        autoRotate: false
+    });
+
     const handleUpload = () => {
         setStatus('uploading');
         setProgress(0);
@@ -66,6 +76,8 @@ export const Workspace = () => {
         setTimeout(() => {
             setStatus('enhanced');
             setStatusText('Model Enhanced');
+            // Update material to "premium" look
+            setMaterial(prev => ({ ...prev, color: '#11C5D9', roughness: 0.1, metalness: 1.0, emissive: 0.2 }));
         }, 6000);
     };
 
@@ -73,6 +85,14 @@ export const Workspace = () => {
         setStatus('idle');
         setProgress(0);
         setStatusText('');
+        setMaterial({
+            color: '#D4A857',
+            roughness: 0.2,
+            metalness: 0.9,
+            emissive: 0,
+            wireframe: false,
+            autoRotate: false
+        });
     };
 
     return (
@@ -100,16 +120,19 @@ export const Workspace = () => {
 
             {/* Center - Canvas */}
             <div className="canvas-area">
-                <ThreeCanvas>
+                <ThreeCanvas autoRotate={material.autoRotate}>
                     {/* 3D Content based on state */}
                     {status === 'idle' || status === 'uploading' ? null : (
                         <group>
                             <mesh rotation={[0.5, 0.5, 0]}>
                                 <torusKnotGeometry args={[0.45, 0.15, 128, 32]} />
                                 <meshStandardMaterial
-                                    color={status === 'enhanced' ? "#11C5D9" : "#D4A857"}
-                                    roughness={status === 'enhanced' ? 0.1 : 0.5}
-                                    metalness={status === 'enhanced' ? 1.0 : 0.5}
+                                    color={material.color}
+                                    roughness={material.roughness}
+                                    metalness={material.metalness}
+                                    emissive={material.color}
+                                    emissiveIntensity={material.emissive}
+                                    wireframe={material.wireframe}
                                 />
                             </mesh>
                         </group>
@@ -223,48 +246,124 @@ export const Workspace = () => {
                 </div>
 
                 <div className="panel-content">
+                    {/* Model Info */}
                     <div className="prop-group">
-                        <label className="prop-label">Dimensions</label>
-                        <div className="prop-grid">
-                            {['X', 'Y', 'Z'].map(axis => (
-                                <div key={axis} className="prop-item">
-                                    <span style={{ color: 'var(--color-soft-gold)', fontSize: '0.75rem', marginRight: '4px' }}>{axis}</span>
-                                    <span style={{ fontSize: '0.875rem', fontFamily: 'var(--font-mono)', color: 'white' }}>1.00</span>
-                                </div>
-                            ))}
+                        <label className="prop-label">Model Info</label>
+                        <div className="prop-card">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                <span style={{ fontSize: '0.875rem', color: 'var(--color-fog-silver)' }}>Vertices</span>
+                                <span style={{ fontSize: '0.875rem', fontFamily: 'var(--font-mono)' }}>12,405</span>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                <span style={{ fontSize: '0.875rem', color: 'var(--color-fog-silver)' }}>Format</span>
+                                <span style={{ fontSize: '0.875rem', fontFamily: 'var(--font-mono)' }}>GLB</span>
+                            </div>
                         </div>
                     </div>
 
+                    {/* Material Settings */}
                     <div className="prop-group">
                         <label className="prop-label">Material</label>
                         <div className="prop-card">
+                            {/* Color */}
                             <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: '0.875rem', color: 'white' }}>Roughness</span>
-                                <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>
-                                    {status === 'enhanced' ? '0.1' : '0.5'}
-                                </span>
-                            </div>
-                            <div className="bar-container">
-                                <motion.div
-                                    className="bar-fill"
-                                    animate={{ width: status === 'enhanced' ? '10%' : '50%' }}
-                                    transition={{ duration: 1 }}
+                                <span style={{ fontSize: '0.875rem', color: 'white' }}>Base Color</span>
+                                <input
+                                    type="color"
+                                    value={material.color}
+                                    onChange={(e) => setMaterial({ ...material, color: e.target.value })}
+                                    style={{ background: 'none', border: 'none', width: '24px', height: '24px', cursor: 'pointer' }}
                                 />
                             </div>
 
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', paddingTop: '8px' }}>
-                                <span style={{ fontSize: '0.875rem', color: 'white' }}>Metalness</span>
-                                <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>
-                                    {status === 'enhanced' ? '1.0' : '0.5'}
-                                </span>
-                            </div>
-                            <div className="bar-container">
-                                <motion.div
-                                    className="bar-fill"
-                                    animate={{ width: status === 'enhanced' ? '100%' : '50%' }}
-                                    transition={{ duration: 1 }}
+                            {/* Roughness */}
+                            <div style={{ marginTop: '12px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                    <span style={{ fontSize: '0.875rem', color: 'white' }}>Roughness</span>
+                                    <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>{material.roughness.toFixed(2)}</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="0" max="1" step="0.01"
+                                    value={material.roughness}
+                                    onChange={(e) => setMaterial({ ...material, roughness: parseFloat(e.target.value) })}
                                 />
                             </div>
+
+                            {/* Metalness */}
+                            <div style={{ marginTop: '12px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                    <span style={{ fontSize: '0.875rem', color: 'white' }}>Metalness</span>
+                                    <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>{material.metalness.toFixed(2)}</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="0" max="1" step="0.01"
+                                    value={material.metalness}
+                                    onChange={(e) => setMaterial({ ...material, metalness: parseFloat(e.target.value) })}
+                                />
+                            </div>
+
+                            {/* Emissive */}
+                            <div style={{ marginTop: '12px' }}>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                    <span style={{ fontSize: '0.875rem', color: 'white' }}>Emissive</span>
+                                    <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>{material.emissive.toFixed(2)}</span>
+                                </div>
+                                <input
+                                    type="range"
+                                    min="0" max="2" step="0.1"
+                                    value={material.emissive}
+                                    onChange={(e) => setMaterial({ ...material, emissive: parseFloat(e.target.value) })}
+                                />
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* View Settings */}
+                    <div className="prop-group">
+                        <label className="prop-label">View Settings</label>
+                        <div className="prop-card">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                <span style={{ fontSize: '0.875rem', color: 'white' }}>Auto Rotate</span>
+                                <label className="toggle-switch">
+                                    <input
+                                        type="checkbox"
+                                        checked={material.autoRotate}
+                                        onChange={(e) => setMaterial({ ...material, autoRotate: e.target.checked })}
+                                    />
+                                    <span className="slider-toggle"></span>
+                                </label>
+                            </div>
+                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
+                                <span style={{ fontSize: '0.875rem', color: 'white' }}>Wireframe</span>
+                                <label className="toggle-switch">
+                                    <input
+                                        type="checkbox"
+                                        checked={material.wireframe}
+                                        onChange={(e) => setMaterial({ ...material, wireframe: e.target.checked })}
+                                    />
+                                    <span className="slider-toggle"></span>
+                                </label>
+                            </div>
+                        </div>
+                    </div>
+
+                    {/* Enhancement Settings (Mock) */}
+                    <div className="prop-group">
+                        <label className="prop-label">Enhancement</label>
+                        <div className="prop-card">
+                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                <span style={{ fontSize: '0.875rem', color: 'white' }}>Denoising</span>
+                                <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>0.75</span>
+                            </div>
+                            <input type="range" min="0" max="1" step="0.01" defaultValue="0.75" />
+
+                            <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                <span style={{ fontSize: '0.875rem', color: 'white' }}>Texture Detail</span>
+                                <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>High</span>
+                            </div>
+                            <input type="range" min="0" max="1" step="0.5" defaultValue="1" />
                         </div>
                     </div>
                 </div>
