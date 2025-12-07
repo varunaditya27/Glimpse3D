@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { ThreeCanvas } from '../components/ThreeCanvas';
 import { Button } from '../components/Button';
-import { Upload, Layers, Settings, Share2, Download, Maximize2, RotateCcw, Wand2 } from 'lucide-react';
+import { Upload, Sliders, Sparkles, Download, Maximize2, RotateCcw, Wand2, Folder } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 
@@ -23,7 +23,8 @@ const ToolButton = ({ icon: Icon, label, active, onClick }: { icon: any, label: 
 );
 
 export const Workspace = () => {
-    const [activeTool, setActiveTool] = useState('upload');
+    // Tools: 'project', 'editor', 'ai', 'export'
+    const [activeTool, setActiveTool] = useState('project');
     const [status, setStatus] = useState<'idle' | 'uploading' | 'processing' | 'ready' | 'enhancing' | 'enhanced'>('idle');
     const [progress, setProgress] = useState(0);
     const [statusText, setStatusText] = useState('');
@@ -37,6 +38,10 @@ export const Workspace = () => {
         wireframe: false,
         autoRotate: false
     });
+
+    // AI Command Bar State
+    const [prompt, setPrompt] = useState('');
+    const [isGenerating, setIsGenerating] = useState(false);
 
     const handleUpload = () => {
         setStatus('uploading');
@@ -62,12 +67,14 @@ export const Workspace = () => {
         setTimeout(() => {
             setStatus('ready');
             setStatusText('Ready to enhance');
+            setActiveTool('editor'); // Auto-switch to editor
         }, 3000);
     };
 
     const handleEnhance = () => {
         setStatus('enhancing');
         setStatusText('Initializing AI pipeline...');
+        setActiveTool('ai'); // Auto-switch to AI view
 
         setTimeout(() => setStatusText('Refining textures (SDXL)...'), 1500);
         setTimeout(() => setStatusText('Back-projecting details...'), 3000);
@@ -93,6 +100,40 @@ export const Workspace = () => {
             wireframe: false,
             autoRotate: false
         });
+        setPrompt('');
+        setActiveTool('project');
+    };
+
+    const handlePromptSubmit = (e: React.FormEvent) => {
+        e.preventDefault();
+        if (!prompt.trim()) return;
+
+        setIsGenerating(true);
+        setStatusText('AI is editing model...');
+
+        // Mock AI Logic
+        setTimeout(() => {
+            const p = prompt.toLowerCase();
+            let newMaterial = { ...material };
+
+            if (p.includes('gold')) {
+                newMaterial = { ...material, color: '#FFD700', roughness: 0.2, metalness: 1.0 };
+            } else if (p.includes('rusty') || p.includes('rust')) {
+                newMaterial = { ...material, color: '#8B4513', roughness: 0.8, metalness: 0.2 };
+            } else if (p.includes('blue') || p.includes('ice')) {
+                newMaterial = { ...material, color: '#00FFFF', roughness: 0.1, metalness: 0.8, emissive: 0.5 };
+            } else if (p.includes('stone') || p.includes('rock')) {
+                newMaterial = { ...material, color: '#808080', roughness: 0.9, metalness: 0.1 };
+            } else {
+                // Default "Cyberpunk" random
+                newMaterial = { ...material, color: '#FF00FF', roughness: 0.2, metalness: 0.8 };
+            }
+
+            setMaterial(newMaterial);
+            setIsGenerating(false);
+            setStatusText('Model updated via AI');
+            setPrompt('');
+        }, 2000);
     };
 
     return (
@@ -107,14 +148,10 @@ export const Workspace = () => {
                 </div>
 
                 <div style={{ display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', padding: '0 8px' }}>
-                    <ToolButton icon={Upload} label="Upload" active={activeTool === 'upload'} onClick={() => setActiveTool('upload')} />
-                    <ToolButton icon={Layers} label="Layers" active={activeTool === 'layers'} onClick={() => setActiveTool('layers')} />
-                    <ToolButton icon={Wand2} label="Enhance" active={activeTool === 'enhance'} onClick={() => setActiveTool('enhance')} />
-                    <ToolButton icon={Settings} label="Settings" active={activeTool === 'settings'} onClick={() => setActiveTool('settings')} />
-                </div>
-
-                <div style={{ marginTop: 'auto', display: 'flex', flexDirection: 'column', gap: '16px', width: '100%', padding: '0 8px' }}>
-                    <ToolButton icon={Share2} label="Share" />
+                    <ToolButton icon={Folder} label="Project" active={activeTool === 'project'} onClick={() => setActiveTool('project')} />
+                    <ToolButton icon={Sliders} label="Editor" active={activeTool === 'editor'} onClick={() => setActiveTool('editor')} />
+                    <ToolButton icon={Sparkles} label="AI Lab" active={activeTool === 'ai'} onClick={() => setActiveTool('ai')} />
+                    <ToolButton icon={Download} label="Export" active={activeTool === 'export'} onClick={() => setActiveTool('export')} />
                 </div>
             </div>
 
@@ -154,7 +191,7 @@ export const Workspace = () => {
                 )}
 
                 {/* Uploading / Processing Overlay */}
-                {(status === 'uploading' || status === 'processing') && (
+                {(status === 'uploading' || status === 'processing' || isGenerating) && (
                     <div style={{ position: 'absolute', inset: 0, display: 'flex', alignItems: 'center', justifyContent: 'center', backgroundColor: 'rgba(0,0,0,0.7)', backdropFilter: 'blur(5px)', zIndex: 20 }}>
                         <div style={{ textAlign: 'center', width: '300px' }}>
                             <h3 style={{ marginBottom: '16px', fontSize: '1.25rem' }}>{statusText}</h3>
@@ -167,7 +204,7 @@ export const Workspace = () => {
                                     />
                                 </div>
                             )}
-                            {status === 'processing' && (
+                            {(status === 'processing' || isGenerating) && (
                                 <div className="w-8 h-8 border-2 border-soft-gold border-t-transparent rounded-full animate-spin mx-auto" style={{ width: '32px', height: '32px', border: '2px solid var(--color-soft-gold)', borderTopColor: 'transparent', borderRadius: '50%', animation: 'spin 1s linear infinite', margin: '0 auto' }} />
                             )}
                         </div>
@@ -176,7 +213,7 @@ export const Workspace = () => {
 
                 {/* Scanning Effect Overlay */}
                 <AnimatePresence>
-                    {status === 'enhancing' && (
+                    {(status === 'enhancing' || isGenerating) && (
                         <motion.div
                             initial={{ opacity: 0 }}
                             animate={{ opacity: 1 }}
@@ -196,6 +233,52 @@ export const Workspace = () => {
                                 {statusText}
                             </p>
                         </div>
+
+                        {/* AI Command Bar - Visible in Editor and AI modes */}
+                        {(activeTool === 'editor' || activeTool === 'ai') && (
+                            <div style={{ position: 'absolute', bottom: '100px', left: '50%', transform: 'translateX(-50%)', zIndex: 15, width: '400px' }}>
+                                <form onSubmit={handlePromptSubmit} style={{ position: 'relative', width: '100%' }}>
+                                    <input
+                                        type="text"
+                                        placeholder="Describe changes (e.g. 'Make it gold')..."
+                                        value={prompt}
+                                        onChange={(e) => setPrompt(e.target.value)}
+                                        style={{
+                                            width: '100%',
+                                            padding: '12px 48px 12px 20px',
+                                            borderRadius: '30px',
+                                            border: '1px solid rgba(255,255,255,0.1)',
+                                            background: 'rgba(11, 12, 16, 0.8)',
+                                            backdropFilter: 'blur(10px)',
+                                            color: 'white',
+                                            outline: 'none',
+                                            boxShadow: '0 10px 30px -10px rgba(0,0,0,0.5)'
+                                        }}
+                                    />
+                                    <button
+                                        type="submit"
+                                        style={{
+                                            position: 'absolute',
+                                            right: '8px',
+                                            top: '50%',
+                                            transform: 'translateY(-50%)',
+                                            width: '32px',
+                                            height: '32px',
+                                            borderRadius: '50%',
+                                            background: 'var(--color-soft-gold)',
+                                            display: 'flex',
+                                            alignItems: 'center',
+                                            justifyContent: 'center',
+                                            color: 'black',
+                                            cursor: 'pointer',
+                                            border: 'none'
+                                        }}
+                                    >
+                                        <Wand2 size={16} />
+                                    </button>
+                                </form>
+                            </div>
+                        )}
 
                         <div className="canvas-overlay-bc">
                             {status === 'ready' && (
@@ -238,141 +321,174 @@ export const Workspace = () => {
                 )}
             </div>
 
-            {/* Right Panel - Details */}
+            {/* Right Panel - Contextual */}
             <div className="details-panel">
                 <div className="panel-header">
-                    <h3 style={{ color: 'var(--color-pure-white)', fontWeight: 600, marginBottom: '4px' }}>Properties</h3>
-                    <p style={{ color: 'var(--color-fog-silver)', fontSize: '0.75rem' }}>Model Metadata & Settings</p>
+                    <h3 style={{ color: 'var(--color-pure-white)', fontWeight: 600, marginBottom: '4px' }}>
+                        {activeTool === 'project' && 'Project Info'}
+                        {activeTool === 'editor' && 'Material Editor'}
+                        {activeTool === 'ai' && 'AI Lab'}
+                        {activeTool === 'export' && 'Export'}
+                    </h3>
+                    <p style={{ color: 'var(--color-fog-silver)', fontSize: '0.75rem' }}>
+                        {activeTool === 'project' && 'Manage your 3D asset'}
+                        {activeTool === 'editor' && 'Fine-tune appearance'}
+                        {activeTool === 'ai' && 'Enhance with Generative AI'}
+                        {activeTool === 'export' && 'Download your model'}
+                    </p>
                 </div>
 
                 <div className="panel-content">
-                    {/* Model Info */}
-                    <div className="prop-group">
-                        <label className="prop-label">Model Info</label>
-                        <div className="prop-card">
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
-                                <span style={{ fontSize: '0.875rem', color: 'var(--color-fog-silver)' }}>Vertices</span>
-                                <span style={{ fontSize: '0.875rem', fontFamily: 'var(--font-mono)' }}>12,405</span>
-                            </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between' }}>
-                                <span style={{ fontSize: '0.875rem', color: 'var(--color-fog-silver)' }}>Format</span>
-                                <span style={{ fontSize: '0.875rem', fontFamily: 'var(--font-mono)' }}>GLB</span>
-                            </div>
-                        </div>
-                    </div>
 
-                    {/* Material Settings */}
-                    <div className="prop-group">
-                        <label className="prop-label">Material</label>
-                        <div className="prop-card">
-                            {/* Color */}
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: '0.875rem', color: 'white' }}>Base Color</span>
-                                <input
-                                    type="color"
-                                    value={material.color}
-                                    onChange={(e) => setMaterial({ ...material, color: e.target.value })}
-                                    style={{ background: 'none', border: 'none', width: '24px', height: '24px', cursor: 'pointer' }}
-                                />
-                            </div>
-
-                            {/* Roughness */}
-                            <div style={{ marginTop: '12px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                    <span style={{ fontSize: '0.875rem', color: 'white' }}>Roughness</span>
-                                    <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>{material.roughness.toFixed(2)}</span>
+                    {/* PROJECT VIEW */}
+                    {activeTool === 'project' && (
+                        <div className="prop-group">
+                            <label className="prop-label">Model Metadata</label>
+                            <div className="prop-card">
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                    <span style={{ fontSize: '0.875rem', color: 'var(--color-fog-silver)' }}>Status</span>
+                                    <span style={{ fontSize: '0.875rem', fontFamily: 'var(--font-mono)', color: status === 'enhanced' ? 'var(--color-soft-gold)' : 'white' }}>{status.toUpperCase()}</span>
                                 </div>
-                                <input
-                                    type="range"
-                                    min="0" max="1" step="0.01"
-                                    value={material.roughness}
-                                    onChange={(e) => setMaterial({ ...material, roughness: parseFloat(e.target.value) })}
-                                />
-                            </div>
-
-                            {/* Metalness */}
-                            <div style={{ marginTop: '12px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                    <span style={{ fontSize: '0.875rem', color: 'white' }}>Metalness</span>
-                                    <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>{material.metalness.toFixed(2)}</span>
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '8px' }}>
+                                    <span style={{ fontSize: '0.875rem', color: 'var(--color-fog-silver)' }}>Vertices</span>
+                                    <span style={{ fontSize: '0.875rem', fontFamily: 'var(--font-mono)' }}>12,405</span>
                                 </div>
-                                <input
-                                    type="range"
-                                    min="0" max="1" step="0.01"
-                                    value={material.metalness}
-                                    onChange={(e) => setMaterial({ ...material, metalness: parseFloat(e.target.value) })}
-                                />
-                            </div>
-
-                            {/* Emissive */}
-                            <div style={{ marginTop: '12px' }}>
-                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                    <span style={{ fontSize: '0.875rem', color: 'white' }}>Emissive</span>
-                                    <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>{material.emissive.toFixed(2)}</span>
+                                <div style={{ display: 'flex', justifyContent: 'space-between' }}>
+                                    <span style={{ fontSize: '0.875rem', color: 'var(--color-fog-silver)' }}>Format</span>
+                                    <span style={{ fontSize: '0.875rem', fontFamily: 'var(--font-mono)' }}>GLB</span>
                                 </div>
-                                <input
-                                    type="range"
-                                    min="0" max="2" step="0.1"
-                                    value={material.emissive}
-                                    onChange={(e) => setMaterial({ ...material, emissive: parseFloat(e.target.value) })}
-                                />
+                            </div>
+
+                            <div style={{ marginTop: '24px' }}>
+                                <Button variant="outline" onClick={handleReset} style={{ width: '100%' }}>
+                                    <Upload size={16} style={{ marginRight: '8px' }} />
+                                    Upload New Image
+                                </Button>
                             </div>
                         </div>
-                    </div>
+                    )}
 
-                    {/* View Settings */}
-                    <div className="prop-group">
-                        <label className="prop-label">View Settings</label>
-                        <div className="prop-card">
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
-                                <span style={{ fontSize: '0.875rem', color: 'white' }}>Auto Rotate</span>
-                                <label className="toggle-switch">
-                                    <input
-                                        type="checkbox"
-                                        checked={material.autoRotate}
-                                        onChange={(e) => setMaterial({ ...material, autoRotate: e.target.checked })}
-                                    />
-                                    <span className="slider-toggle"></span>
-                                </label>
+                    {/* EDITOR VIEW */}
+                    {activeTool === 'editor' && (
+                        <>
+                            <div className="prop-group">
+                                <label className="prop-label">Material</label>
+                                <div className="prop-card">
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontSize: '0.875rem', color: 'white' }}>Base Color</span>
+                                        <input
+                                            type="color"
+                                            value={material.color}
+                                            onChange={(e) => setMaterial({ ...material, color: e.target.value })}
+                                            style={{ background: 'none', border: 'none', width: '24px', height: '24px', cursor: 'pointer' }}
+                                        />
+                                    </div>
+                                    <div style={{ marginTop: '12px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                            <span style={{ fontSize: '0.875rem', color: 'white' }}>Roughness</span>
+                                            <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>{material.roughness.toFixed(2)}</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="0" max="1" step="0.01"
+                                            value={material.roughness}
+                                            onChange={(e) => setMaterial({ ...material, roughness: parseFloat(e.target.value) })}
+                                        />
+                                    </div>
+                                    <div style={{ marginTop: '12px' }}>
+                                        <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                            <span style={{ fontSize: '0.875rem', color: 'white' }}>Metalness</span>
+                                            <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>{material.metalness.toFixed(2)}</span>
+                                        </div>
+                                        <input
+                                            type="range"
+                                            min="0" max="1" step="0.01"
+                                            value={material.metalness}
+                                            onChange={(e) => setMaterial({ ...material, metalness: parseFloat(e.target.value) })}
+                                        />
+                                    </div>
+                                </div>
                             </div>
-                            <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
-                                <span style={{ fontSize: '0.875rem', color: 'white' }}>Wireframe</span>
-                                <label className="toggle-switch">
-                                    <input
-                                        type="checkbox"
-                                        checked={material.wireframe}
-                                        onChange={(e) => setMaterial({ ...material, wireframe: e.target.checked })}
-                                    />
-                                    <span className="slider-toggle"></span>
-                                </label>
+
+                            <div className="prop-group">
+                                <label className="prop-label">View Settings</label>
+                                <div className="prop-card">
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                                        <span style={{ fontSize: '0.875rem', color: 'white' }}>Auto Rotate</span>
+                                        <label className="toggle-switch">
+                                            <input
+                                                type="checkbox"
+                                                checked={material.autoRotate}
+                                                onChange={(e) => setMaterial({ ...material, autoRotate: e.target.checked })}
+                                            />
+                                            <span className="slider-toggle"></span>
+                                        </label>
+                                    </div>
+                                    <div style={{ display: 'flex', justifyContent: 'space-between', alignItems: 'center', marginTop: '12px' }}>
+                                        <span style={{ fontSize: '0.875rem', color: 'white' }}>Wireframe</span>
+                                        <label className="toggle-switch">
+                                            <input
+                                                type="checkbox"
+                                                checked={material.wireframe}
+                                                onChange={(e) => setMaterial({ ...material, wireframe: e.target.checked })}
+                                            />
+                                            <span className="slider-toggle"></span>
+                                        </label>
+                                    </div>
+                                </div>
+                            </div>
+                        </>
+                    )}
+
+                    {/* AI LAB VIEW */}
+                    {activeTool === 'ai' && (
+                        <div className="prop-group">
+                            <label className="prop-label">Enhancement Controls</label>
+                            <div className="prop-card">
+                                <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                    <span style={{ fontSize: '0.875rem', color: 'white' }}>Denoising Strength</span>
+                                    <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>0.75</span>
+                                </div>
+                                <input type="range" min="0" max="1" step="0.01" defaultValue="0.75" />
+
+                                <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
+                                    <span style={{ fontSize: '0.875rem', color: 'white' }}>Texture Detail</span>
+                                    <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>High</span>
+                                </div>
+                                <input type="range" min="0" max="1" step="0.5" defaultValue="1" />
+
+                                <div style={{ marginTop: '24px', padding: '12px', background: 'rgba(17, 197, 217, 0.1)', borderRadius: '8px', border: '1px solid rgba(17, 197, 217, 0.3)' }}>
+                                    <p style={{ fontSize: '0.75rem', color: 'var(--color-ultramarine-cyan)' }}>
+                                        <Sparkles size={12} style={{ display: 'inline', marginRight: '4px' }} />
+                                        AI Enhancement is active. Use the command bar to refine further.
+                                    </p>
+                                </div>
                             </div>
                         </div>
-                    </div>
+                    )}
 
-                    {/* Enhancement Settings (Mock) */}
-                    <div className="prop-group">
-                        <label className="prop-label">Enhancement</label>
-                        <div className="prop-card">
-                            <div style={{ display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                <span style={{ fontSize: '0.875rem', color: 'white' }}>Denoising</span>
-                                <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>0.75</span>
+                    {/* EXPORT VIEW */}
+                    {activeTool === 'export' && (
+                        <div className="prop-group">
+                            <label className="prop-label">Export Options</label>
+                            <div className="prop-card">
+                                <div style={{ marginBottom: '12px' }}>
+                                    <label style={{ display: 'block', fontSize: '0.875rem', color: 'white', marginBottom: '8px' }}>Format</label>
+                                    <select style={{ width: '100%', padding: '8px', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-graphite-gray)', color: 'white' }}>
+                                        <option>GLB (Recommended)</option>
+                                        <option>OBJ</option>
+                                        <option>USDZ</option>
+                                        <option>Splat</option>
+                                    </select>
+                                </div>
+                                <Button variant="outline" disabled={status !== 'enhanced'} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                    <Download size={18} />
+                                    Download Model
+                                </Button>
                             </div>
-                            <input type="range" min="0" max="1" step="0.01" defaultValue="0.75" />
-
-                            <div style={{ marginTop: '12px', display: 'flex', justifyContent: 'space-between', marginBottom: '4px' }}>
-                                <span style={{ fontSize: '0.875rem', color: 'white' }}>Texture Detail</span>
-                                <span style={{ fontSize: '0.75rem', fontFamily: 'var(--font-mono)', color: 'var(--color-soft-gold)' }}>High</span>
-                            </div>
-                            <input type="range" min="0" max="1" step="0.5" defaultValue="1" />
                         </div>
-                    </div>
-                </div>
+                    )}
 
-                <div className="panel-footer">
-                    <Button variant="outline" disabled={status !== 'enhanced'} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                        <Download size={18} />
-                        Export Model
-                    </Button>
                 </div>
             </div>
         </div>
