@@ -4,9 +4,10 @@ import { Suspense } from 'react';
 
 interface ThreeCanvasProps {
     children?: React.ReactNode;
+    autoRotate?: boolean;
 }
 
-export const ThreeCanvas = ({ children }: ThreeCanvasProps) => {
+export const ThreeCanvas = ({ children, autoRotate = false }: ThreeCanvasProps) => {
     return (
         <div style={{ width: '100%', height: '100%', position: 'relative', background: 'linear-gradient(to bottom, #0B0C10, #161A1F)' }}>
             <Canvas
@@ -27,6 +28,8 @@ export const ThreeCanvas = ({ children }: ThreeCanvasProps) => {
                         enablePan={false}
                         minPolarAngle={0}
                         maxPolarAngle={Math.PI / 1.5}
+                        autoRotate={autoRotate}
+                        autoRotateSpeed={1.0}
                     />
                 </Suspense>
             </Canvas>
