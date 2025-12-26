@@ -1,172 +1,45 @@
-# MiDaS Depth Estimation Module
+### MiDaS Depth module (integration with the rest of the project):
 
-This module provides monocular depth estimation for the Glimpse3D pipeline using Intel's MiDaS models.
+---
 
-## 📋 Overview
 
-**What it does**: Takes a single RGB image and outputs a depth map showing how far each pixel is from the camera.
+Final outcome — what the midas_depth module produces and how that output is used downstream
 
-**Role in Glimpse3D**: 
-- Provides geometric guidance for 3D reconstruction
-- Ensures depth consistency during the refinement loop
-- Supports back-projection of enhanced views into the 3D Gaussian Splat model
+Primary outputs
 
-## 🚀 Quick Start
+- Raw depth array (.npy) — float32 H×W, normalized (0..1) per image. This is the canonical data used by the pipeline.
+- Grayscale image (.png) — quick visual debug (white = near, black = far).
+- Colored heatmap (.png) — human-friendly visualization (magma/viridis).
 
-### 1. Install Dependencies
+Immediate next-step use (pipeline integration)
 
-```bash
-cd Glimpse3D/ai_modules/midas_depth
-pip install -r requirements.txt
-```
+- Backend receives:
+    - RGB image (the same view)
+    - Depth (.npy)
+    - Camera intrinsics (fx, fy, cx, cy) and extrinsics/pose for that rendered view
 
-**For GPU acceleration (recommended):**
-```bash
-# CUDA 11.8
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+- Backprojection (pixel → 3D point)
+    - Convert normalized depth → metric depth (if a scale is available), then:
+        x = (u - cx) * z / fx
+        y = (v - cy) * z / fy
+        z = depth_value (in metric units)
+    - Produce point cloud with colors from RGB.
 
-# CUDA 12.1
-pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
-```
+- Point cloud → 3D representation
+    - Compute normals / confidence per point.
+    - Convert points into Gaussian splats or merge into existing gsplat model (update splat positions, colors, weights).
 
-### 2. Run Quick Test
+- Fusion & refinement
+    - If multiple views: align scales (median/ICP), fuse by confidence-weighted blending.
+    - After SDXL-enhanced views, re-run depth and fuse improved geometry/texture back into model.
+    - Optionally run smoothing, outlier removal, and splat optimization passes.
 
-```bash
-python test_depth.py
-```
+- Export / render
+    - Re-render the gsplat model for preview, iterate enhancements, or export (.ply/.glb/.splat).
 
-This creates a test image and verifies the module works correctly.
+Practical notes / gotchas
 
-### 3. CLI Usage
-
-```bash
-# Basic usage
-python run_depth.py -i path/to/image.jpg -o output_folder
-
-# With specific model
-python run_depth.py -i image.jpg -o output -m DPT_Large
-
-# Save raw numpy file
-python run_depth.py -i image.jpg -o output --save-raw
-
-# Use CPU explicitly
-python run_depth.py -i image.jpg -o output -d cpu
-```
-
-## 📦 Python API
-
-### Simple Usage
-
-```python
-from ai_modules.midas_depth import estimate_depth, save_depth_visualization
-
-# Estimate depth
-depth = estimate_depth("photo.jpg")
-
-# Save visualization
-save_depth_visualization(depth, "depth_colored.png")
-```
-
-### Advanced Usage
-
-```python
-from ai_modules.midas_depth import DepthEstimator
-
-# Create estimator with specific settings
-estimator = DepthEstimator(
-    model_type="DPT_Large",  # Higher quality
-    device="cuda",           # Use GPU
-    optimize=True            # Half precision for speed
-)
-
-# Process multiple images efficiently
-images = ["img1.jpg", "img2.jpg", "img3.jpg"]
-depths = estimator.estimate_batch(images)
-
-# Process PIL Image or numpy array
-from PIL import Image
-img = Image.open("photo.jpg")
-depth = estimator.estimate(img)
-```
-
-## 🔧 Available Models
-
-| Model | Quality | Speed | VRAM | Use Case |
-|-------|---------|-------|------|----------|
-| `MiDaS_small` | ★★☆ | ★★★ | ~500MB | Development, quick tests |
-| `DPT_Hybrid` | ★★★ | ★★☆ | ~1GB | Balanced quality/speed |
-| `DPT_Large` | ★★★★ | ★☆☆ | ~1.5GB | Production, best quality |
-
-## 📊 Output Format
-
-The module outputs:
-- **Normalized depth map**: NumPy array `(H, W)`, `float32`, values in `[0, 1]`
-  - `1.0` = Closest to camera
-  - `0.0` = Farthest from camera
-
-### Saving Options
-
-```python
-from ai_modules.midas_depth import (
-    save_depth_visualization,  # Colored PNG (magma colormap)
-    save_depth_grayscale,      # Grayscale PNG
-    save_depth_raw,            # NumPy .npy file (full precision)
-)
-```
-
-## 🧪 Testing
-
-```bash
-# Run all tests
-pytest test_depth.py -v
-
-# Run with coverage
-pytest test_depth.py --cov=. --cov-report=html
-
-# Quick manual test
-python test_depth.py
-```
-
-## 📁 Files
-
-```
-midas_depth/
-├── __init__.py       # Module exports
-├── run_depth.py      # Core implementation + CLI
-├── test_depth.py     # Unit tests
-├── requirements.txt  # Dependencies
-└── README.md         # This file
-```
-
-## 🔗 Integration with Pipeline
-
-This module is called by `backend/app/services/depth_service.py`:
-
-```python
-from ai_modules.midas_depth import estimate_depth
-
-class DepthService:
-    def get_depth(self, image_path: str):
-        return estimate_depth(image_path, model_type="DPT_Hybrid")
-```
-
-## ⚠️ Troubleshooting
-
-### "CUDA out of memory"
-- Use `MiDaS_small` model
-- Set `device="cpu"`
-- Reduce image size before processing
-
-### "torch.hub download fails"
-- Check internet connection
-- Try: `torch.hub.set_dir("path/to/cache")`
-
-### Depth looks inverted
-- MiDaS outputs inverse depth (higher = closer)
-- This is already handled; `1.0` = closest after normalization
-
-## 📚 References
-
-- [MiDaS Paper](https://arxiv.org/abs/1907.01341)
-- [MiDaS GitHub](https://github.com/isl-org/MiDaS)
-- [PyTorch Hub](https://pytorch.org/hub/intelisl_midas_v2/)
+- The .npy depth is the important programmatic output — always save and pass it to the backprojection module.
+- MiDaS depth is relative per-image; you need scale alignment across views before metric fusion.
+- Use confidence masks and filtering (median/bilateral) before fusing to reduce edge/noise artifacts.
+- Keep camera intrinsics and view pose with each depth map — without them backprojection is impossible.
