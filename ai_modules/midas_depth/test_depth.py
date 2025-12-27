@@ -30,6 +30,13 @@ from midas_depth.run_depth import (
     load_depth_raw,
 )
 
+from midas_depth.depth_alignment import (
+    align_depth_scales,
+    align_depth_scales_global,
+    estimate_overlap_simple,
+    compute_alignment_quality,
+)
+
 
 def create_test_image(size=(256, 256)) -> Image.Image:
     """Create a simple test image with gradient."""
@@ -168,6 +175,96 @@ class TestConvenienceFunctions:
             os.unlink(f.name)
 
 
+class TestDepthAlignment:
+    """Tests for the depth alignment module."""
+    
+    def test_align_single_depth(self):
+        """Test alignment with single depth map (should return copy)."""
+        depth = np.random.rand(100, 100).astype(np.float32)
+        aligned = align_depth_scales([depth])
+        
+        assert len(aligned) == 1
+        assert np.allclose(aligned[0], depth)
+    
+    def test_align_two_depths_different_scales(self):
+        """Test alignment corrects scale differences."""
+        base = np.random.rand(100, 100).astype(np.float32) * 0.5 + 0.25
+        
+        depth1 = base.copy()
+        depth2 = (base * 1.5).clip(0, 1)  # Different scale
+        
+        aligned = align_depth_scales([depth1, depth2])
+        
+        # After alignment, medians should be closer
+        median_diff_before = abs(np.median(depth1) - np.median(depth2))
+        median_diff_after = abs(np.median(aligned[0]) - np.median(aligned[1]))
+        
+        assert median_diff_after < median_diff_before
+    
+    def test_align_three_depths(self):
+        """Test alignment with three depth maps."""
+        base = np.random.rand(100, 100).astype(np.float32) * 0.5 + 0.25
+        
+        depths = [
+            base.copy(),
+            (base * 2.0).clip(0, 1),
+            base * 0.5,
+        ]
+        
+        aligned = align_depth_scales(depths)
+        
+        assert len(aligned) == 3
+        for d in aligned:
+            assert d.dtype == np.float32
+            assert d.min() >= 0.0
+            assert d.max() <= 1.0
+    
+    def test_global_alignment(self):
+        """Test global alignment optimization."""
+        base = np.random.rand(100, 100).astype(np.float32) * 0.5 + 0.25
+        
+        depths = [
+            base.copy(),
+            (base * 1.8).clip(0, 1),
+            base * 0.6,
+        ]
+        
+        aligned = align_depth_scales_global(depths)
+        
+        assert len(aligned) == 3
+        for d in aligned:
+            assert d.dtype == np.float32
+    
+    def test_overlap_estimation(self):
+        """Test simple overlap mask estimation."""
+        depth1 = np.random.rand(100, 100).astype(np.float32)
+        depth2 = np.random.rand(100, 100).astype(np.float32)
+        
+        mask1, mask2 = estimate_overlap_simple(depth1, depth2)
+        
+        assert mask1.shape == (100, 100)
+        assert mask2.shape == (100, 100)
+        assert mask1.dtype == bool
+        assert mask2.dtype == bool
+    
+    def test_alignment_quality_metrics(self):
+        """Test quality metrics computation."""
+        base = np.random.rand(100, 100).astype(np.float32) * 0.5 + 0.25
+        depths = [base.copy(), base.copy()]  # Same depth = perfect alignment
+        
+        quality = compute_alignment_quality(depths)
+        
+        assert "n_views" in quality
+        assert "mean_error" in quality
+        assert "max_error" in quality
+        assert quality["n_views"] == 2
+    
+    def test_empty_input(self):
+        """Test handling of empty input."""
+        aligned = align_depth_scales([])
+        assert aligned == []
+
+
 class TestEdgeCases:
     """Tests for edge cases and error handling."""
     
@@ -203,6 +300,54 @@ class TestEdgeCases:
 # ============================================================================
 # Quick manual test
 # ============================================================================
+
+def run_alignment_test():
+    """Test depth alignment functionality."""
+    print("\n" + "=" * 60)
+    print("Testing Depth Alignment (Novel Feature)")
+    print("=" * 60)
+    
+    # Create test depths with different scales
+    np.random.seed(42)
+    base = np.random.rand(128, 128).astype(np.float32) * 0.5 + 0.25
+    
+    depths = [
+        base.copy(),              # Reference
+        (base * 2.0).clip(0, 1),  # 2x scale
+        base * 0.5,               # 0.5x scale
+    ]
+    
+    print("\n1. Before alignment (medians):")
+    for i, d in enumerate(depths):
+        print(f"   View {i}: {np.median(d):.4f}")
+    
+    # Align
+    print("\n2. Aligning depth scales...")
+    aligned = align_depth_scales(depths)
+    
+    print("\n3. After alignment (medians):")
+    for i, d in enumerate(aligned):
+        print(f"   View {i}: {np.median(d):.4f}")
+    
+    # Quality
+    quality = compute_alignment_quality(aligned)
+    print(f"\n4. Quality metrics:")
+    print(f"   Mean error: {quality['mean_error']:.4f}")
+    print(f"   Max error:  {quality['max_error']:.4f}")
+    
+    # Verify improvement
+    before_spread = max(np.median(d) for d in depths) - min(np.median(d) for d in depths)
+    after_spread = max(np.median(d) for d in aligned) - min(np.median(d) for d in aligned)
+    
+    print(f"\n5. Median spread: {before_spread:.4f} → {after_spread:.4f}")
+    
+    if after_spread < before_spread:
+        print("   ✅ Alignment improved consistency!")
+    else:
+        print("   ⚠️ Alignment may need tuning")
+    
+    return True
+
 
 def run_quick_test():
     """Run a quick manual test without pytest."""
@@ -248,3 +393,7 @@ def run_quick_test():
 
 if __name__ == "__main__":
     run_quick_test()
+    run_alignment_test()
+    print("\n" + "=" * 60)
+    print("✅ All tests completed!")
+    print("=" * 60)

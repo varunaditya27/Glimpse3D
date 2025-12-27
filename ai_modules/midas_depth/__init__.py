@@ -32,7 +32,16 @@ from .run_depth import (
     load_depth_raw,
 )
 
+from .depth_alignment import (
+    align_depth_scales,
+    align_depth_scales_global,
+    compute_overlap_mask,
+    estimate_overlap_simple,
+    compute_alignment_quality,
+)
+
 __all__ = [
+    # Core depth estimation
     "DepthEstimator",
     "estimate_depth",
     "get_estimator",
@@ -40,6 +49,12 @@ __all__ = [
     "save_depth_grayscale",
     "save_depth_raw",
     "load_depth_raw",
+    # Novel: Multi-view alignment
+    "align_depth_scales",
+    "align_depth_scales_global",
+    "compute_overlap_mask",
+    "estimate_overlap_simple",
+    "compute_alignment_quality",
 ]
 
-__version__ = "1.0.0"
+__version__ = "1.1.0"
