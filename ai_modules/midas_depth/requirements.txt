@@ -14,6 +14,8 @@ torchvision>=0.15.0
 # Image processing
 Pillow>=9.0.0
 numpy>=1.21.0
+opencv-python>=4.5.0
+scipy>=1.7.0
 
 # MiDaS model dependencies (auto-installed via torch.hub, but listed for reference)
 timm>=0.9.0
@@ -27,3 +29,4 @@ pytest-cov>=4.0.0
 
 # Optional: For faster inference on supported hardware
 # onnxruntime-gpu>=1.15.0  # Uncomment for ONNX acceleration
+

@@ -37,6 +37,13 @@ from midas_depth.depth_alignment import (
     compute_alignment_quality,
 )
 
+from midas_depth.depth_confidence import (
+    estimate_depth_confidence,
+    apply_confidence_mask,
+    weighted_depth_fusion,
+    get_reliable_depth_mask,
+)
+
 
 def create_test_image(size=(256, 256)) -> Image.Image:
     """Create a simple test image with gradient."""
@@ -173,6 +180,85 @@ class TestConvenienceFunctions:
             assert img.size == (256, 256)
             assert img.mode == "RGB"
             os.unlink(f.name)
+
+
+class TestDepthConfidence:
+    """Tests for the depth confidence module."""
+    
+    def test_confidence_output_shape(self):
+        """Test that confidence has same shape as depth."""
+        depth = np.random.rand(100, 100).astype(np.float32)
+        confidence = estimate_depth_confidence(depth)
+        
+        assert confidence.shape == depth.shape
+        assert confidence.dtype == np.float32
+    
+    def test_confidence_range(self):
+        """Test that confidence is in [0, 1]."""
+        depth = np.random.rand(100, 100).astype(np.float32)
+        confidence = estimate_depth_confidence(depth)
+        
+        assert confidence.min() >= 0.0
+        assert confidence.max() <= 1.0
+    
+    def test_confidence_with_rgb(self):
+        """Test confidence with RGB image."""
+        depth = np.random.rand(100, 100).astype(np.float32)
+        rgb = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+        
+        confidence = estimate_depth_confidence(depth, rgb)
+        
+        assert confidence.shape == depth.shape
+        assert confidence.min() >= 0.0
+        assert confidence.max() <= 1.0
+    
+    def test_edges_have_lower_confidence(self):
+        """Test that depth edges have lower confidence."""
+        # Create depth with sharp edge
+        depth = np.zeros((100, 100), dtype=np.float32)
+        depth[:, 50:] = 1.0  # Sharp edge at x=50
+        
+        confidence = estimate_depth_confidence(depth)
+        
+        # Edge region should have lower confidence than flat regions
+        edge_conf = confidence[:, 48:52].mean()
+        flat_conf = confidence[:, 10:40].mean()
+        
+        assert edge_conf < flat_conf
+    
+    def test_apply_confidence_mask(self):
+        """Test applying confidence mask."""
+        depth = np.random.rand(100, 100).astype(np.float32)
+        confidence = np.random.rand(100, 100).astype(np.float32)
+        
+        masked = apply_confidence_mask(depth, confidence, threshold=0.5)
+        
+        # Low confidence pixels should be masked
+        assert masked[confidence < 0.5].sum() == 0
+    
+    def test_weighted_fusion(self):
+        """Test weighted depth fusion."""
+        depth1 = np.random.rand(100, 100).astype(np.float32)
+        depth2 = np.random.rand(100, 100).astype(np.float32)
+        conf1 = np.ones_like(depth1) * 0.8
+        conf2 = np.ones_like(depth2) * 0.2
+        
+        fused, fused_conf = weighted_depth_fusion([depth1, depth2], [conf1, conf2])
+        
+        assert fused.shape == depth1.shape
+        assert fused_conf.shape == depth1.shape
+        # Fused should be closer to depth1 (higher confidence)
+        diff1 = np.abs(fused - depth1).mean()
+        diff2 = np.abs(fused - depth2).mean()
+        assert diff1 < diff2
+    
+    def test_reliable_depth_mask(self):
+        """Test reliable depth mask extraction."""
+        confidence = np.random.rand(100, 100).astype(np.float32)
+        mask = get_reliable_depth_mask(confidence, threshold=0.5)
+        
+        assert mask.dtype == bool
+        assert mask.shape == confidence.shape
 
 
 class TestDepthAlignment:
@@ -391,9 +477,80 @@ def run_quick_test():
     print("=" * 60)
 
 
+def run_confidence_test():
+    """Test depth confidence estimation."""
+    print("\n" + "=" * 60)
+    print("Testing Depth Confidence (Novel Feature)")
+    print("=" * 60)
+    
+    # Create test depth with known features
+    print("\n1. Creating test depth with edge...")
+    depth = np.zeros((128, 128), dtype=np.float32)
+    depth[:, 64:] = 0.8  # Sharp edge at x=64
+    depth[:, :30] = 0.3  # Flat region
+    
+    # Create test RGB with texture variation
+    rgb = np.zeros((128, 128, 3), dtype=np.uint8)
+    rgb[:, :, 0] = np.linspace(0, 255, 128).astype(np.uint8)  # Gradient
+    rgb[40:80, 40:80] = [100, 100, 100]  # Textureless patch
+    
+    print(f"   Depth shape: {depth.shape}")
+    print(f"   RGB shape: {rgb.shape}")
+    
+    # Compute confidence
+    print("\n2. Computing confidence...")
+    confidence = estimate_depth_confidence(depth, rgb)
+    print(f"   Confidence shape: {confidence.shape}")
+    print(f"   Confidence range: [{confidence.min():.3f}, {confidence.max():.3f}]")
+    print(f"   Mean confidence: {confidence.mean():.3f}")
+    
+    # Check edge has lower confidence
+    print("\n3. Checking edge detection...")
+    edge_region_conf = confidence[:, 62:66].mean()
+    flat_region_conf = confidence[:, 10:25].mean()
+    print(f"   Edge region confidence: {edge_region_conf:.3f}")
+    print(f"   Flat region confidence: {flat_region_conf:.3f}")
+    
+    if edge_region_conf < flat_region_conf:
+        print("   ✅ Edge correctly identified as lower confidence!")
+    else:
+        print("   ⚠️ Edge detection may need tuning")
+    
+    # Test masking
+    print("\n4. Testing confidence masking...")
+    masked = apply_confidence_mask(depth, confidence, threshold=0.3)
+    masked_pct = 100 * np.sum(masked == 0) / masked.size
+    print(f"   Masked pixels: {masked_pct:.1f}%")
+    
+    # Test fusion
+    print("\n5. Testing weighted fusion...")
+    depth2 = depth + np.random.rand(128, 128).astype(np.float32) * 0.1
+    conf1 = confidence
+    conf2 = np.ones_like(depth) * 0.3  # Lower confidence
+    
+    fused, fused_conf = weighted_depth_fusion([depth, depth2], [conf1, conf2])
+    print(f"   Fused depth range: [{fused.min():.3f}, {fused.max():.3f}]")
+    print(f"   Fused confidence range: [{fused_conf.min():.3f}, {fused_conf.max():.3f}]")
+    
+    # Verify fusion is closer to higher confidence input
+    diff1 = np.abs(fused - depth).mean()
+    diff2 = np.abs(fused - depth2).mean()
+    if diff1 < diff2:
+        print("   ✅ Fusion correctly weighted toward higher confidence!")
+    else:
+        print("   ⚠️ Fusion weighting may need review")
+    
+    print("\n" + "=" * 60)
+    print("✅ Confidence test completed!")
+    print("=" * 60)
+    
+    return True
+
+
 if __name__ == "__main__":
     run_quick_test()
     run_alignment_test()
+    run_confidence_test()
     print("\n" + "=" * 60)
     print("✅ All tests completed!")
     print("=" * 60)

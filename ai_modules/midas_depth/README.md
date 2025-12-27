@@ -111,6 +111,58 @@ python depth_alignment.py -d view1.npy view2.npy view3.npy -o aligned_output/
 
 ---
 
+## Novel Feature: Confidence-Weighted Depth
+
+**Problem:** Depth predictions are unreliable at edges, reflections, and textureless regions.
+
+**Solution:** `depth_confidence.py` estimates per-pixel confidence to guide downstream fusion.
+
+### Usage
+
+```python
+from ai_modules.midas_depth import (
+    estimate_depth,
+    estimate_depth_confidence,
+    weighted_depth_fusion
+)
+from PIL import Image
+import numpy as np
+
+# Get depth and confidence
+depth = estimate_depth("image.jpg")
+rgb = np.array(Image.open("image.jpg"))
+confidence = estimate_depth_confidence(depth, rgb)
+
+# Fuse multiple views using confidence
+fused, fused_conf = weighted_depth_fusion([depth1, depth2], [conf1, conf2])
+```
+
+### CLI
+
+```bash
+python depth_confidence.py -d depth.npy -i image.png -o confidence_output/
+```
+
+### Functions
+
+| Function | Purpose |
+|----------|----------|
+| `estimate_depth_confidence()` | Compute per-pixel confidence (0-1) |
+| `apply_confidence_mask()` | Zero out low-confidence pixels |
+| `weighted_depth_fusion()` | Fuse depths using confidence weights |
+| `visualize_confidence()` | Save confidence as colored image |
+| `get_reliable_depth_mask()` | Binary mask of reliable regions |
+
+### Confidence Factors
+
+| Factor | Low Confidence When | Why |
+|--------|--------------------|----||
+| **Edge** | High depth gradient | MiDaS blurs depth at boundaries |
+| **Texture** | Flat RGB (no texture) | Hard to match in stereo/multi-view |
+| **Range** | Depth near 0 or 1 | Extreme values often noisy |
+
+---
+
 ## File Structure
 
 ```
@@ -118,6 +170,7 @@ midas_depth/
 ├── __init__.py           # Module exports
 ├── run_depth.py          # Core depth estimation
 ├── depth_alignment.py    # Novel: Multi-view scale alignment
+├── depth_confidence.py   # Novel: Confidence-weighted depth
 ├── test_depth.py         # Unit tests
 ├── requirements.txt      # Dependencies
 └── README.md             # This file
