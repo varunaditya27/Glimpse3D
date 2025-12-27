@@ -40,6 +40,14 @@ from .depth_alignment import (
     compute_alignment_quality,
 )
 
+from .depth_confidence import (
+    estimate_depth_confidence,
+    apply_confidence_mask,
+    weighted_depth_fusion,
+    visualize_confidence,
+    get_reliable_depth_mask,
+)
+
 __all__ = [
     # Core depth estimation
     "DepthEstimator",
@@ -55,6 +63,12 @@ __all__ = [
     "compute_overlap_mask",
     "estimate_overlap_simple",
     "compute_alignment_quality",
+    # Novel: Confidence estimation
+    "estimate_depth_confidence",
+    "apply_confidence_mask",
+    "weighted_depth_fusion",
+    "visualize_confidence",
+    "get_reliable_depth_mask",
 ]
 
-__version__ = "1.1.0"
+__version__ = "1.2.0"
