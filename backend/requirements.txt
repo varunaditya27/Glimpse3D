@@ -1,0 +1,15 @@
+fastapi
+uvicorn
+python-multipart
+pydantic
+torch
+torchvision
+numpy
+Pillow
+rembg
+diffusers
+transformers
+accelerate
+scipy
+plyfile
+# gsplat (install from source or specific wheel)
