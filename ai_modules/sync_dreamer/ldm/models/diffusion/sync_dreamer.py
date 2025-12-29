@@ -271,7 +271,11 @@ class SyncMultiviewDiffusion(pl.LightningModule):
             disable_training_module(self.cc_projection)
 
     def _init_multiview(self):
-        K, azs, _, _, poses = read_pickle(f'meta_info/camera-{self.view_num}.pkl')
+        # Use absolute path relative to this file's location
+        import os
+        module_dir = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+        pkl_path = os.path.join(module_dir, 'meta_info', f'camera-{self.view_num}.pkl')
+        K, azs, _, _, poses = read_pickle(pkl_path)
         default_image_size = 256
         ratio = self.image_size/default_image_size
         K = np.diag([ratio,ratio,1]) @ K
