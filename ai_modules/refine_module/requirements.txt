@@ -1,0 +1,27 @@
+# MVCRM - Multi-View Consistency Refinement Module
+# Requirements for the refinement system
+
+# Core dependencies
+torch>=2.0.0
+torchvision>=0.15.0
+numpy>=1.24.0
+scipy>=1.10.0
+
+# Deep learning models
+transformers>=4.30.0  # For DINOv2, CLIP
+lpips>=0.1.4  # Perceptual loss
+
+# Geometry processing
+open3d>=0.17.0  # Point cloud operations (optional but recommended)
+
+# Utilities
+pillow>=9.5.0
+opencv-python>=4.7.0
+
+# Optional: Advanced feature extractors
+# clip @ git+https://github.com/openai/CLIP.git  # If not using transformers version
+# dinov2 (installed via torch.hub)
+
+# Development (optional)
+pytest>=7.3.0
+black>=23.0.0
