@@ -6,6 +6,13 @@ Multi-view consistent image generation from a single input image.
 
 SyncDreamer generates **16 consistent multi-view images** from a single input image, which are then used by the Glimpse3D pipeline for 3D reconstruction.
 
+## 📓 Inference Notebooks
+
+| Notebook | Description |
+|----------|-------------|
+| [Glimpse3D_SyncDreamer_Inference.ipynb](../../notebooks/Glimpse3D_SyncDreamer_Inference.ipynb) | **Recommended** - Uses this module directly. Run via VS Code + Colab Extension |
+| [SyncDreamer_Colab_Inference.ipynb](../../notebooks/SyncDreamer_Colab_Inference.ipynb) | Standalone - Clones original SyncDreamer repo |
+
 ### Why SyncDreamer over Zero123?
 
 | Aspect | Zero123 | SyncDreamer |
