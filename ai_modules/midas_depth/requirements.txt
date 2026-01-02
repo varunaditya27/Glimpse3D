@@ -1,0 +1,32 @@
+# ============================================================================
+# MiDaS Depth Estimation - Requirements
+# ============================================================================
+# Install with: pip install -r requirements.txt
+# ============================================================================
+
+# Core PyTorch (install appropriate version for your CUDA)
+# For CUDA 11.8: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu118
+# For CUDA 12.1: pip install torch torchvision --index-url https://download.pytorch.org/whl/cu121
+# For CPU only:  pip install torch torchvision --index-url https://download.pytorch.org/whl/cpu
+torch>=2.0.0
+torchvision>=0.15.0
+
+# Image processing
+Pillow>=9.0.0
+numpy>=1.21.0
+opencv-python>=4.5.0
+scipy>=1.7.0
+
+# MiDaS model dependencies (auto-installed via torch.hub, but listed for reference)
+timm>=0.9.0
+
+# Visualization (for colored depth maps)
+matplotlib>=3.5.0
+
+# Testing
+pytest>=7.0.0
+pytest-cov>=4.0.0
+
+# Optional: For faster inference on supported hardware
+# onnxruntime-gpu>=1.15.0  # Uncomment for ONNX acceleration
+
