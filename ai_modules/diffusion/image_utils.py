@@ -144,9 +144,9 @@ def resize_with_aspect(
         new_w = int(w * target_size / h)
     
     # Round to multiple of 64 (required by many diffusion models)
-    new_w = (new_w // 64) * 64
-    new_h = (new_h // 64) * 64
-    
+    # Ensure minimum of 64 pixels to prevent zero dimensions
+    new_w = max(64, (new_w // 64) * 64)
+    new_h = max(64, (new_h // 64) * 64)
     return image.resize((new_w, new_h), resample)
 
 

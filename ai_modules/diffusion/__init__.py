@@ -47,6 +47,7 @@ from .memory_utils import (
     clear_gpu_memory,
     estimate_vram_usage,
     MemoryConfig,
+    print_memory_report,
 )
 
 from .image_utils import (
@@ -89,6 +90,7 @@ __all__ = [
     "clear_gpu_memory",
     "estimate_vram_usage",
     "MemoryConfig",
+    "print_memory_report",
     # Image processing
     "preprocess_for_diffusion",
     "postprocess_from_diffusion",

@@ -190,8 +190,12 @@ class EnhanceService:
                     device=self.config.device
                 )
                 print(f"✓ Depth estimator loaded ({self.config.depth_model})")
-            except ImportError:
-                print("⚠ midas_depth module not available, auto_depth disabled")
+            except ImportError as e:
+                print(f"⚠ midas_depth module not available: {e}")
+                print("  auto_depth disabled - provide depth_map manually")
+                self.config.auto_depth = False
+            except Exception as e:
+                print(f"⚠ Failed to load depth estimator: {e}")
                 self.config.auto_depth = False
         
         # Load prompt builder
@@ -407,7 +411,9 @@ class EnhanceService:
             from .image_utils import blend_images
             
             # Create blend mask (high confidence = use enhanced)
-            mask = np.clip(confidence / confidence_threshold, 0, 1)
+            # Clamp threshold to avoid division by zero
+            safe_threshold = max(confidence_threshold, 1e-6)
+            mask = np.clip(confidence / safe_threshold, 0, 1)
             
             enhanced = blend_images(
                 original=original,

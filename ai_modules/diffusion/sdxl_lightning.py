@@ -51,27 +51,32 @@ class LightningConfig:
 
 
 # SDXL Lightning model variants
+# NOTE: ByteDance recommends using UNet checkpoints (not LoRA) for SDXL base models
+# LoRA is only recommended for non-SDXL base models
 LIGHTNING_MODELS = {
     "lightning_4step": {
         "base_model": "stabilityai/stable-diffusion-xl-base-1.0",
-        "lora_repo": "ByteDance/SDXL-Lightning",
-        "lora_file": "sdxl_lightning_4step_lora.safetensors",
+        "repo": "ByteDance/SDXL-Lightning",
+        "unet_file": "sdxl_lightning_4step_unet.safetensors",
         "steps": 4,
+        "prediction_type": "epsilon",
         "description": "4-step Lightning (recommended)",
     },
     "lightning_2step": {
         "base_model": "stabilityai/stable-diffusion-xl-base-1.0",
-        "lora_repo": "ByteDance/SDXL-Lightning",
-        "lora_file": "sdxl_lightning_2step_lora.safetensors",
+        "repo": "ByteDance/SDXL-Lightning",
+        "unet_file": "sdxl_lightning_2step_unet.safetensors",
         "steps": 2,
+        "prediction_type": "epsilon",
         "description": "2-step Lightning (fastest with good quality)",
     },
     "lightning_1step": {
         "base_model": "stabilityai/stable-diffusion-xl-base-1.0",
-        "lora_repo": "ByteDance/SDXL-Lightning",
-        "lora_file": "sdxl_lightning_1step_lora.safetensors",
+        "repo": "ByteDance/SDXL-Lightning",
+        "unet_file": "sdxl_lightning_1step_unet_x0.safetensors",  # Special x0 checkpoint for 1-step
         "steps": 1,
-        "description": "1-step Lightning (fastest, lower quality)",
+        "prediction_type": "sample",  # 1-step uses "sample" prediction, not "epsilon"!
+        "description": "1-step Lightning (experimental, lower quality)",
     },
 }
 
@@ -149,14 +154,32 @@ class SDXLLightningPipeline:
             StableDiffusionXLImg2ImgPipeline,
             ControlNetModel,
             EulerDiscreteScheduler,
+            UNet2DConditionModel,
         )
         from huggingface_hub import hf_hub_download
+        from safetensors.torch import load_file
         
         dtype = torch.float16 if self.device == "cuda" else torch.float32
         
         print(f"Loading SDXL Lightning ({self.steps}-step)...")
         print(f"  Device: {self.device}")
         print(f"  ControlNet: {self.use_controlnet}")
+        print(f"  Using UNet checkpoint (recommended by ByteDance)")
+        
+        base_model = self.model_info["base_model"]
+        
+        # Load Lightning UNet checkpoint (better quality than LoRA for SDXL base)
+        print(f"  Downloading Lightning UNet ({self.steps}-step)...")
+        unet_path = hf_hub_download(
+            self.model_info["repo"],
+            self.model_info["unet_file"]
+        )
+        
+        # Load UNet config and weights
+        unet = UNet2DConditionModel.from_config(base_model, subfolder="unet")
+        unet.load_state_dict(load_file(unet_path, device="cpu"))
+        unet = unet.to(device=self.device, dtype=dtype)
+        print(f"  ✓ Lightning UNet loaded")
         
         # Load ControlNet if enabled
         if self.use_controlnet:
@@ -174,12 +197,11 @@ class SDXLLightningPipeline:
                 use_safetensors=True,
             )
         
-        # Load base SDXL with or without ControlNet
-        base_model = self.model_info["base_model"]
-        
+        # Load base SDXL with custom UNet
         if self.use_controlnet and self.controlnet is not None:
             self.pipe = StableDiffusionXLControlNetImg2ImgPipeline.from_pretrained(
                 base_model,
+                unet=unet,
                 controlnet=self.controlnet,
                 torch_dtype=dtype,
                 variant="fp16" if dtype == torch.float16 else None,
@@ -188,26 +210,21 @@ class SDXLLightningPipeline:
         else:
             self.pipe = StableDiffusionXLImg2ImgPipeline.from_pretrained(
                 base_model,
+                unet=unet,
                 torch_dtype=dtype,
                 variant="fp16" if dtype == torch.float16 else None,
                 use_safetensors=True,
             )
         
-        # Set up Euler scheduler for Lightning
+        # Get correct prediction type for scheduler
+        prediction_type = self.model_info.get("prediction_type", "epsilon")
+        
+        # Set up Euler scheduler for Lightning with correct settings
         self.pipe.scheduler = EulerDiscreteScheduler.from_config(
             self.pipe.scheduler.config,
             timestep_spacing="trailing",
-            prediction_type="epsilon",
+            prediction_type=prediction_type,
         )
-        
-        # Load Lightning LoRA
-        print(f"  Loading Lightning LoRA ({self.steps}-step)...")
-        lora_path = hf_hub_download(
-            self.model_info["lora_repo"],
-            self.model_info["lora_file"]
-        )
-        self.pipe.load_lora_weights(lora_path)
-        self.pipe.fuse_lora()
         
         # Apply memory optimizations
         if self.optimize_memory:
@@ -298,8 +315,22 @@ class SDXLLightningPipeline:
         }
         
         # Add ControlNet parameters if available
-        if control_image is not None and self.use_controlnet:
-            gen_kwargs["control_image"] = control_image
+        # Note: StableDiffusionXLControlNetImg2ImgPipeline REQUIRES control_image
+        # If we have a ControlNet pipeline but no depth, create a dummy depth from image
+        if self.use_controlnet and self.controlnet is not None:
+            if control_image is not None:
+                gen_kwargs["control_image"] = control_image
+            else:
+                # Create grayscale version of input as fallback control image
+                # This allows using the ControlNet pipeline without depth
+                import warnings
+                warnings.warn(
+                    "ControlNet enabled but no depth_map provided. "
+                    "Using grayscale input image as control. "
+                    "For best results, provide depth_map from midas_depth module."
+                )
+                gray = processed_image.convert('L').convert('RGB')
+                gen_kwargs["control_image"] = gray
             gen_kwargs["controlnet_conditioning_scale"] = controlnet_scale
         
         # Generate

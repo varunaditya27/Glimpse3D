@@ -169,33 +169,31 @@ def setup_memory_optimization(
             pass
     
     # 5. CPU offloading (mutually exclusive modes)
+    # NOTE: CPU offload must be applied BEFORE moving to device manually
+    # The offload functions handle device placement internally
     if config.cpu_offload_mode == "sequential":
         # Most aggressive - slowest but fits in <8GB
         try:
             pipe.enable_sequential_cpu_offload()
             print("  ✓ Sequential CPU offload enabled")
         except AttributeError:
-            pass
+            print("  ✗ Sequential CPU offload not available for this pipeline")
     elif config.cpu_offload_mode == "model":
         # Balanced - offloads entire model between steps
         try:
             pipe.enable_model_cpu_offload()
             print("  ✓ Model CPU offload enabled")
         except AttributeError:
-            pass
+            print("  ✗ Model CPU offload not available for this pipeline")
     else:
         # No offloading - fastest, requires most VRAM
         if device == "cuda":
             pipe = pipe.to(device)
+            print(f"  ✓ Pipeline moved to {device}")
     
-    # 6. FP16 precision
-    if config.use_fp16 and device == "cuda":
-        try:
-            pipe = pipe.to(torch.float16)
-            print("  ✓ FP16 precision enabled")
-        except Exception:
-            pass
-    
+    # Note: FP16 conversion is handled during model loading (torch_dtype=torch.float16)
+    # Do NOT call pipe.to(torch.float16) after CPU offload as it breaks the offload mechanism
+
     return pipe
 
 

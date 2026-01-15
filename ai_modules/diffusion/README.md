@@ -12,6 +12,7 @@ Single Image → SyncDreamer (16 views) → 3DGS → Render → [This Module] �
 
 The diffusion module enhances rendered views from the coarse 3D model using:
 - **SDXL Lightning**: Fast inference (2-4 steps vs 30-50 for base SDXL)
+  - Uses **UNet checkpoints** (recommended by ByteDance) for best quality
 - **ControlNet Depth**: Structure preservation using depth maps from `midas_depth` module
 
 ## Quick Start

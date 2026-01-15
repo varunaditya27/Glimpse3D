@@ -81,6 +81,13 @@ def prepare_depth_for_controlnet(
             ...
         )
     """
+    # Input validation
+    if depth is None or not isinstance(depth, np.ndarray):
+        raise ValueError("depth must be a numpy array")
+    
+    if depth.ndim != 2:
+        raise ValueError(f"depth must be 2D array, got shape {depth.shape}")
+    
     depth_arr = depth.copy().astype(np.float32)
     
     # Normalize to [0, 1] if needed
