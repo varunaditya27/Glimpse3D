@@ -32,10 +32,32 @@ paths = generate_multiview("input.png", "outputs/", elevation=30.0)
 - **Purpose**: Handles the creation, rendering, and optimization of 3D Gaussian Splats.
 - **Usage**: The core 3D format used for real-time rendering and iterative updates.
 
-### 5. `diffusion/` (Texture Enhancement)
-- **Model**: Stable Diffusion XL (SDXL) + ControlNet
-- **Purpose**: Enhances the visual quality of rendered views.
-- **Usage**: Adds high-frequency details and realistic textures to the coarse 3D model.
+### 5. `diffusion/` (Texture Enhancement) ⭐ **ENHANCED**
+- **Model**: SDXL Lightning + ControlNet Depth
+- **Purpose**: Enhances the visual quality of rendered views with depth-guided structure preservation.
+- **Features**:
+  - SDXL Lightning (4-step inference vs 30-50 for base SDXL)
+  - ControlNet depth conditioning using `midas_depth` module output
+  - T4 GPU optimized (fits in 15GB VRAM)
+  - Confidence-weighted blending with original
+- **VRAM**: ~12GB with optimizations
+
+```python
+from ai_modules.midas_depth import estimate_depth
+from ai_modules.diffusion import EnhanceService
+
+# Get depth from midas_depth module
+depth = estimate_depth("rendered_view.png")
+
+# Enhance with SDXL Lightning + ControlNet
+service = EnhanceService(device="cuda")
+enhanced = service.enhance(
+    image="rendered_view.png",
+    depth_map=depth,
+    prompt="photorealistic 3D render"
+)
+```
+
 
 ### 6. `refine_module/` (The Core Innovation)
 - **Type**: Custom Algorithm (MVCRM)
@@ -63,11 +85,26 @@ Gaussian Splatting Reconstruction
     ↓
 Enhancement Loop (MVCRM):
   1. Render View from 3DGS
-  2. Enhance with SDXL + ControlNet  
+  2. Enhance with SDXL Lightning + ControlNet (depth-guided)
   3. Back-Project into Gaussians
     ↓
 Refined 3D Model → Export (.ply / .splat / .glb)
 ```
+
+## 🔗 Module Integration
+
+The modules are designed to work together seamlessly:
+
+```python
+# midas_depth → diffusion integration
+from ai_modules.midas_depth import estimate_depth, estimate_depth_confidence
+from ai_modules.diffusion import EnhanceService
+
+depth = estimate_depth(rendered_view)        # MiDaS depth
+confidence = estimate_depth_confidence(...)   # Confidence map
+enhanced = service.enhance(view, depth_map=depth)  # SDXL enhancement
+```
+
 
 ## 🛠 Integration
 
@@ -75,20 +112,25 @@ These modules are imported and orchestrated by the **Backend Services** (`backen
 
 ## 📥 Model Checkpoints
 
-Download required models:
+Most models are **auto-downloaded** from HuggingFace on first run. Manual downloads:
 
 ```bash
 python scripts/download_models.py
 ```
 
-Or manually download:
-
 | Model | Location | Download |
 |-------|----------|----------|
-| SyncDreamer | `sync_dreamer/ckpt/` | [Google Drive](https://drive.google.com/file/d/1ypyD5WXxAnsWjnHgAfOAGolV0Zd9kpam/view) |
-| MiDaS | `midas_depth/models/` | Auto-downloaded |
-| SDXL | `model_checkpoints/SDXL/` | HuggingFace |
-| ControlNet | `model_checkpoints/ControlNet/` | HuggingFace |
+| SyncDreamer | `sync_dreamer/ckpt/` | [Google Drive](https://drive.google.com/file/d/1ypyD5WXxAnsWjnHgAfOAGolV0Zd9kpam/view) (manual) |
+| MiDaS | Auto-downloaded | PyTorch Hub |
+| SDXL Lightning | Auto-downloaded | HuggingFace (`ByteDance/SDXL-Lightning`) |
+| ControlNet Depth | Auto-downloaded | HuggingFace (`xinsir/controlnet-depth-sdxl-1.0`) |
+
+**Note**: SDXL + ControlNet downloads ~10GB on first run. Set cache directory:
+```python
+import os
+os.environ["HF_HOME"] = "/path/to/cache"
+```
+
 
 ## 📚 Module Documentation
 
