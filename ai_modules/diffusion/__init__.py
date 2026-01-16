@@ -54,26 +54,36 @@ from .image_utils import (
     preprocess_for_diffusion,
     postprocess_from_diffusion,
     resize_with_aspect,
+    pad_to_size,
     blend_images,
     match_histogram,
+    prepare_depth_image,
+    save_comparison,
 )
 
 from .prompt_builder import (
     PromptBuilder,
+    PromptConfig,
     build_prompt,
     load_prompt_templates,
+    get_common_prompt,
+    COMMON_PROMPTS,
 )
 
 from .controlnet_depth import (
     prepare_depth_for_controlnet,
+    prepare_depth_batch,
     DepthControlNetAdapter,
     CONTROLNET_MODELS,
+    get_default_controlnet_config,
 )
 
 from .sdxl_lightning import (
     SDXLLightningPipeline,
+    LightningConfig,
     load_sdxl_pipeline,
     get_recommended_settings,
+    LIGHTNING_MODELS,
 )
 
 from .enhance_service import (
@@ -95,20 +105,30 @@ __all__ = [
     "preprocess_for_diffusion",
     "postprocess_from_diffusion",
     "resize_with_aspect",
+    "pad_to_size",
     "blend_images",
     "match_histogram",
+    "prepare_depth_image",
+    "save_comparison",
     # Prompt building
     "PromptBuilder",
+    "PromptConfig",
     "build_prompt",
     "load_prompt_templates",
+    "get_common_prompt",
+    "COMMON_PROMPTS",
     # ControlNet depth (integrates with midas_depth)
     "prepare_depth_for_controlnet",
+    "prepare_depth_batch",
     "DepthControlNetAdapter",
     "CONTROLNET_MODELS",
+    "get_default_controlnet_config",
     # SDXL Lightning pipeline
     "SDXLLightningPipeline",
+    "LightningConfig",
     "load_sdxl_pipeline",
     "get_recommended_settings",
+    "LIGHTNING_MODELS",
     # Main service (orchestrator)
     "EnhanceService",
     "enhance_view",

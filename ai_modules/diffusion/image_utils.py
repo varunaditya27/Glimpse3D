@@ -275,6 +275,15 @@ def match_histogram(
     if isinstance(reference, Image.Image):
         reference = np.array(reference)
     
+    # Validate inputs
+    if source.size == 0 or reference.size == 0:
+        return Image.fromarray(source.astype(np.uint8))
+    
+    if source.ndim != 3 or source.shape[2] < 3:
+        raise ValueError(f"Source must be RGB image, got shape {source.shape}")
+    if reference.ndim != 3 or reference.shape[2] < 3:
+        raise ValueError(f"Reference must be RGB image, got shape {reference.shape}")
+    
     result = np.zeros_like(source)
     
     for c in range(3):  # RGB channels
@@ -287,12 +296,17 @@ def match_histogram(
         )
         ref_values, ref_counts = np.unique(ref_channel, return_counts=True)
         
+        # Handle edge case: empty or constant channels
+        if len(src_values) == 0 or len(ref_values) == 0:
+            result[:, :, c] = src_channel.reshape(source.shape[:2])
+            continue
+        
         # Compute CDFs
         src_cdf = np.cumsum(src_counts).astype(np.float64)
-        src_cdf /= src_cdf[-1]
+        src_cdf /= src_cdf[-1] if src_cdf[-1] > 0 else 1.0
         
         ref_cdf = np.cumsum(ref_counts).astype(np.float64)
-        ref_cdf /= ref_cdf[-1]
+        ref_cdf /= ref_cdf[-1] if ref_cdf[-1] > 0 else 1.0
         
         # Map source values to reference values
         interp_values = np.interp(src_cdf, ref_cdf, ref_values)

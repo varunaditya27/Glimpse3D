@@ -347,6 +347,7 @@ class EnhanceService:
         prompt: Optional[str] = None,
         blend_with_original: bool = True,
         confidence_threshold: float = 0.5,
+        seed: Optional[int] = None,
         **kwargs
     ) -> Image.Image:
         """
@@ -360,6 +361,7 @@ class EnhanceService:
             prompt: Enhancement prompt
             blend_with_original: If True, blend based on confidence
             confidence_threshold: Minimum confidence for full enhancement
+            seed: Random seed for reproducibility
             **kwargs: Additional enhancement arguments
         
         Returns:
@@ -403,6 +405,7 @@ class EnhanceService:
             image=image,
             prompt=prompt,
             depth_map=depth_map,
+            seed=seed,
             **kwargs
         )
         
@@ -436,16 +439,29 @@ class EnhanceService:
         
         Returns:
             Depth map (H, W) with values [0, 1]
+        
+        Raises:
+            RuntimeError: If depth estimation is not available
+            ImportError: If midas_depth module is not installed
         """
         if self.depth_estimator is None:
             if self.config.auto_depth:
-                from ai_modules.midas_depth import get_estimator
-                self.depth_estimator = get_estimator(
-                    model_type=self.config.depth_model,
-                    device=self.config.device
-                )
+                try:
+                    from ai_modules.midas_depth import get_estimator
+                    self.depth_estimator = get_estimator(
+                        model_type=self.config.depth_model,
+                        device=self.config.device
+                    )
+                except ImportError as e:
+                    raise ImportError(
+                        f"midas_depth module required for depth estimation but not available: {e}. "
+                        "Install with: pip install timm torch"
+                    ) from e
             else:
-                raise RuntimeError("Depth estimator not available")
+                raise RuntimeError(
+                    "Depth estimator not available. "
+                    "Either enable auto_depth in config or provide depth_map directly."
+                )
         
         return self.depth_estimator.estimate(image)
     

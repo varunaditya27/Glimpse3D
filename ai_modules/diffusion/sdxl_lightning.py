@@ -175,10 +175,17 @@ class SDXLLightningPipeline:
             self.model_info["unet_file"]
         )
         
-        # Load UNet config and weights
-        unet = UNet2DConditionModel.from_config(base_model, subfolder="unet")
-        unet.load_state_dict(load_file(unet_path, device="cpu"))
-        unet = unet.to(device=self.device, dtype=dtype)
+        # Load UNet config and weights following ByteDance's canonical pattern:
+        # 1. Create UNet and move to device+dtype FIRST
+        # 2. Load weights to SAME device to avoid memory spikes
+        unet = UNet2DConditionModel.from_config(
+            base_model, subfolder="unet"
+        ).to(self.device, dtype)
+        
+        # Load weights directly to the target device
+        unet.load_state_dict(
+            load_file(unet_path, device=self.device if self.device != "cpu" else "cpu")
+        )
         print(f"  ✓ Lightning UNet loaded")
         
         # Load ControlNet if enabled
@@ -303,6 +310,16 @@ class SDXLLightningPipeline:
         # Use configured strength or override
         img_strength = strength if strength is not None else self.config.strength
         
+        # Validate strength - StableDiffusionXLControlNetImg2ImgPipeline crashes with strength=0
+        # See: https://github.com/huggingface/diffusers/issues/6283
+        if img_strength <= 0:
+            raise ValueError(
+                f"strength must be > 0 for img2img pipeline, got {img_strength}. "
+                "Use a small positive value like 0.1 for minimal changes."
+            )
+        if img_strength > 1:
+            img_strength = 1.0  # Clamp to valid range
+        
         # Build generation kwargs
         gen_kwargs = {
             "prompt": prompt,
@@ -316,22 +333,25 @@ class SDXLLightningPipeline:
         
         # Add ControlNet parameters if available
         # Note: StableDiffusionXLControlNetImg2ImgPipeline REQUIRES control_image
-        # If we have a ControlNet pipeline but no depth, create a dummy depth from image
+        # If we have a ControlNet pipeline but no depth, use minimal ControlNet influence
         if self.use_controlnet and self.controlnet is not None:
             if control_image is not None:
                 gen_kwargs["control_image"] = control_image
+                gen_kwargs["controlnet_conditioning_scale"] = controlnet_scale
             else:
-                # Create grayscale version of input as fallback control image
-                # This allows using the ControlNet pipeline without depth
+                # No depth provided - use grayscale as weak structural guidance
+                # IMPORTANT: Reduce ControlNet scale significantly since this isn't real depth
                 import warnings
                 warnings.warn(
                     "ControlNet enabled but no depth_map provided. "
-                    "Using grayscale input image as control. "
-                    "For best results, provide depth_map from midas_depth module."
+                    "Using grayscale input with reduced ControlNet influence (0.1). "
+                    "For proper structure preservation, provide depth_map from midas_depth module.",
+                    UserWarning
                 )
                 gray = processed_image.convert('L').convert('RGB')
                 gen_kwargs["control_image"] = gray
-            gen_kwargs["controlnet_conditioning_scale"] = controlnet_scale
+                # Drastically reduce ControlNet influence since grayscale != depth
+                gen_kwargs["controlnet_conditioning_scale"] = min(0.1, controlnet_scale)
         
         # Generate
         with torch.no_grad():
