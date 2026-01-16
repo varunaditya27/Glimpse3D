@@ -1,0 +1,46 @@
+# ai_modules/diffusion requirements
+# Optimized for T4 GPU (15GB VRAM) on Google Colab
+
+# Core diffusion library
+diffusers>=0.25.0
+
+# Transformers for model loading
+transformers>=4.36.0
+
+# PyTorch (install with CUDA support)
+# torch>=2.1.0  # Usually pre-installed in Colab
+# torchvision>=0.16.0
+
+# Accelerate for memory optimization
+accelerate>=0.25.0
+
+# Memory-efficient attention
+xformers>=0.0.23  # Optional but recommended for T4
+
+# HuggingFace Hub for model downloading
+huggingface_hub>=0.20.0
+
+# Image processing
+Pillow>=10.0.0
+numpy>=1.24.0
+
+# For visualization
+matplotlib>=3.7.0
+
+# SafeTensors for faster model loading
+# Note: device parameter in load_file requires >= 0.4.1
+safetensors>=0.4.1
+
+# Optional: For ONNX optimization
+# onnxruntime-gpu>=1.16.0
+
+# Note: The following are handled by midas_depth module:
+# - torch, torchvision
+# - timm (for MiDaS)
+# - scipy
+
+# Installation order for Colab:
+# 1. torch/torchvision (pre-installed)
+# 2. xformers (for memory efficiency)
+# 3. diffusers, transformers, accelerate
+# 4. huggingface_hub, safetensors
