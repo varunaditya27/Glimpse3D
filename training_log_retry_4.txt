@@ -1,0 +1,70 @@
+
+E:\SEM 3\EL\Glimpse3D>call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat" 
+**********************************************************************
+** Visual Studio 2026 Developer Command Prompt v18.2.0
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[DEBUG:ext\vcvars.bat] Found potential v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[DEBUG:ext\vcvars.bat] Testing v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[vcvarsall.bat] Environment initialized for: 'x64'
+2026-01-17 13:35:09,661 - Glimpse3D-Train - INFO - === Phase 1: Cold Start Reconstruction ===
+2026-01-17 13:35:09,662 - Glimpse3D-Train - INFO - Initial PLY found, skipping reconstruction.
+2026-01-17 13:35:09,662 - Glimpse3D-Train - INFO - === Phase 3: Optimization Loop ===
+2026-01-17 13:35:09,662 - Glimpse3D-Train - INFO - Loading Gaussian Model from ai_modules/gsplat/output/run_demo\initial_splat.ply
+2026-01-17 13:35:09,840 - Glimpse3D-Train - INFO - Starting Refinement for 100 iterations...
+Optimizing:   0%|          | 0/100 [00:00<?, ?it/s]C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\utils\cpp_extension.py:2059: UserWarning: TORCH_CUDA_ARCH_LIST is not set, all archs for visible cards are included for compilation. 
+If this is not desired, please set os.environ['TORCH_CUDA_ARCH_LIST'].
+  warnings.warn(
+Traceback (most recent call last):
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\site-packages\gsplat\cuda\_backend.py", line 167, in <module>
+    from gsplat import csrc as _C
+ImportError: cannot import name 'csrc' from 'gsplat' (C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\site-packages\gsplat\__init__.py)
+
+During handling of the above exception, another exception occurred:
+
+Traceback (most recent call last):
+  File "E:\SEM 3\EL\Glimpse3D\ai_modules\gsplat\train.py", line 149, in <module>
+    main()
+  File "E:\SEM 3\EL\Glimpse3D\ai_modules\gsplat\train.py", line 146, in main
+    train_pipeline(args.image, args.out, args.iter)
+  File "E:\SEM 3\EL\Glimpse3D\ai_modules\gsplat\train.py", line 116, in train_pipeline
+    refined_model = refine_model(
+                    ^^^^^^^^^^^^^
+  File "E:\SEM 3\EL\Glimpse3D\ai_modules\gsplat\optimize.py", line 103, in refine_model
+    rendered_images, alphas, info = gsplat.rasterization(
+                                    ^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\site-packages\gsplat\rendering.py", line 409, in rasterization
+    proj_results = fully_fused_projection(
+                   ^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\site-packages\gsplat\cuda\_wrapper.py", line 423, in fully_fused_projection
+    return _FullyFusedProjection.apply(
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\autograd\function.py", line 575, in apply
+    return super().apply(*args, **kwargs)  # type: ignore[misc]
+           ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\site-packages\gsplat\cuda\_wrapper.py", line 1056, in forward
+    camera_model_type = _make_lazy_cuda_obj(
+                        ^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\site-packages\gsplat\cuda\_wrapper.py", line 24, in _make_lazy_cuda_obj
+    from ._backend import _C
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\site-packages\gsplat\cuda\_backend.py", line 219, in <module>
+    _C = load_extension(
+         ^^^^^^^^^^^^^^^
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\site-packages\gsplat\cuda\_backend.py", line 80, in load_extension
+    compiled = _jit_compile(
+               ^^^^^^^^^^^^^
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\utils\cpp_extension.py", line 1798, in _jit_compile
+    _write_ninja_file_and_build_library(
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\utils\cpp_extension.py", line 1926, in _write_ninja_file_and_build_library
+    _run_ninja_build(
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\site-packages\torch\utils\cpp_extension.py", line 2209, in _run_ninja_build
+    subprocess.run(
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\subprocess.py", line 550, in run
+    stdout, stderr = process.communicate(input, timeout=timeout)
+                     ^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^^
+  File "C:\Users\asus\AppData\Local\Programs\Python\Python311\Lib\subprocess.py", line 1196, in communicate
+    stdout = self.stdout.read()
+             ^^^^^^^^^^^^^^^^^^
+KeyboardInterrupt
+Optimizing:   0%|          | 0/100 [00:10<?, ?it/s]
+^CTerminate batch job (Y/N)? 

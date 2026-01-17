@@ -1,9 +1,112 @@
-import { useState } from 'react';
+import { useState, useRef, Suspense } from 'react';
 import { ThreeCanvas } from '../components/ThreeCanvas';
 import { Button } from '../components/Button';
 import { Upload, Sliders, Sparkles, Download, Maximize2, RotateCcw, Wand2, Folder } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
+import { useLoader } from '@react-three/fiber';
+import { Center, OrbitControls } from '@react-three/drei';
+import { PLYLoader } from 'three-stdlib';
+import * as THREE from 'three';
+
+const ModelViewer = ({ url, material }: { url: string, material: any }) => {
+    const geometry = useLoader(PLYLoader, url);
+
+    // CRITICAL FIX: Gaussian Splat PLY files contain way too many attributes
+    // that exceed WebGL's MAX_VERTEX_ATTRIBS limit (usually 16).
+    // We need to aggressively strip attributes to prevent context loss.
+    if (geometry.attributes) {
+        // Only keep the absolute minimum for basic rendering
+        const keep = ['position']; // Only positions for point cloud
+
+        // Check if we have colors (f_dc_0, f_dc_1, f_dc_2 are SH DC coefficients)
+        const hasSHColors = geometry.attributes.f_dc_0 && geometry.attributes.f_dc_1 && geometry.attributes.f_dc_2;
+
+        if (hasSHColors) {
+            // Convert SH DC to RGB colors
+            try {
+                const positionCount = geometry.attributes.position.count;
+                const colors = new Float32Array(positionCount * 3);
+
+                // SH DC coefficients need to be converted: RGB = 0.5 + C0 * SH_DC
+                // But for visualization, we can use a simplified approach
+                for (let i = 0; i < positionCount; i++) {
+                    // Use SH DC as rough color approximation (not physically correct but prevents context loss)
+                    const r = (geometry.attributes.f_dc_0.array[i] + 0.5) * 255;
+                    const g = (geometry.attributes.f_dc_1.array[i] + 0.5) * 255;
+                    const b = (geometry.attributes.f_dc_2.array[i] + 0.5) * 255;
+
+                    colors[i * 3] = Math.max(0, Math.min(255, r)) / 255;
+                    colors[i * 3 + 1] = Math.max(0, Math.min(255, g)) / 255;
+                    colors[i * 3 + 2] = Math.max(0, Math.min(255, b)) / 255;
+                }
+
+                geometry.setAttribute('color', new THREE.BufferAttribute(colors, 3));
+                keep.push('color');
+            } catch (e) {
+                console.warn('Failed to convert SH colors:', e);
+            }
+        }
+
+        // Delete all other attributes to prevent context loss
+        Object.keys(geometry.attributes).forEach(key => {
+            if (!keep.includes(key)) {
+                geometry.deleteAttribute(key);
+            }
+        });
+
+        // Ensure we don't exceed reasonable vertex count for web
+        const maxVertices = 50000; // Limit for web performance
+        if (geometry.attributes.position.count > maxVertices) {
+            console.warn(`Geometry has ${geometry.attributes.position.count} vertices, limiting to ${maxVertices} for web performance`);
+
+            // Subsample vertices
+            const positions = geometry.attributes.position.array;
+            const colors = geometry.attributes.color?.array;
+
+            const newPositions = new Float32Array(maxVertices * 3);
+            const newColors = colors ? new Float32Array(maxVertices * 3) : null;
+
+            const step = Math.floor(geometry.attributes.position.count / maxVertices);
+            for (let i = 0; i < maxVertices; i++) {
+                const srcIdx = i * step;
+                const dstIdx = i * 3;
+
+                newPositions[dstIdx] = positions[srcIdx * 3];
+                newPositions[dstIdx + 1] = positions[srcIdx * 3 + 1];
+                newPositions[dstIdx + 2] = positions[srcIdx * 3 + 2];
+
+                if (newColors && colors) {
+                    newColors[dstIdx] = colors[srcIdx * 3];
+                    newColors[dstIdx + 1] = colors[srcIdx * 3 + 1];
+                    newColors[dstIdx + 2] = colors[srcIdx * 3 + 2];
+                }
+            }
+
+            geometry.setAttribute('position', new THREE.BufferAttribute(newPositions, 3));
+            if (newColors) {
+                geometry.setAttribute('color', new THREE.BufferAttribute(newColors, 3));
+            }
+        }
+    }
+
+    // Always treat as point cloud for Gaussian Splats
+    // Gaussian Splats are inherently point-based representations
+    return (
+        <Center>
+            <points geometry={geometry} rotation={[0, 0, 0]} scale={[1.5, 1.5, 1.5]}>
+                <pointsMaterial
+                    size={0.02} // Small point size for dense splats
+                    vertexColors={!!geometry.attributes.color}
+                    color={geometry.attributes.color ? undefined : material.color}
+                    sizeAttenuation={true}
+                    transparent={true}
+                    alphaTest={0.1}
+                />
+            </points>
+        </Center>
+    );
+};
 
 const ToolButton = ({ icon: Icon, label, active, onClick }: { icon: any, label: string, active?: boolean, onClick?: () => void }) => (
     <button
@@ -24,10 +127,12 @@ const ToolButton = ({ icon: Icon, label, active, onClick }: { icon: any, label: 
 
 export const Workspace = () => {
     // Tools: 'project', 'editor', 'ai', 'export'
+    // Tools: 'project', 'editor', 'ai', 'export'
     const [activeTool, setActiveTool] = useState('project');
     const [status, setStatus] = useState<'idle' | 'uploading' | 'processing' | 'ready' | 'enhancing' | 'enhanced'>('idle');
     const [progress, setProgress] = useState(0);
     const [statusText, setStatusText] = useState('');
+    const [resultUrl, setResultUrl] = useState<string | null>(null);
 
     // Material State
     const [material, setMaterial] = useState({
@@ -43,55 +148,126 @@ export const Workspace = () => {
     const [prompt, setPrompt] = useState('');
     const [isGenerating, setIsGenerating] = useState(false);
 
-    const handleUpload = () => {
+    // Using a ref properly
+    const inputRef = useRef<HTMLInputElement>(null);
+
+    const handleUploadClick = () => {
+        inputRef.current?.click();
+    };
+
+    const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+        if (!e.target.files || e.target.files.length === 0) return;
+
+        const file = e.target.files[0];
         setStatus('uploading');
         setProgress(0);
         setStatusText('Uploading image...');
 
-        // Simulate Upload
-        const interval = setInterval(() => {
-            setProgress(prev => {
-                if (prev >= 100) {
-                    clearInterval(interval);
-                    startProcessing();
-                    return 100;
-                }
-                return prev + 5;
+        const formData = new FormData();
+        formData.append('file', file);
+
+        try {
+            // 1. Upload
+            const uploadRes = await fetch('/upload/', {
+                method: 'POST',
+                body: formData,
             });
-        }, 100);
+            const uploadData = await uploadRes.json();
+
+            if (!uploadData.success) {
+                throw new Error(uploadData.error || 'Upload failed');
+            }
+
+            const filePath = uploadData.file_path;
+
+            // 2. Trigger Generation
+            startProcessing(filePath);
+
+        } catch (error) {
+            console.error(error);
+            setStatus('idle');
+            setStatusText('Error: ' + String(error));
+        }
     };
 
-    const startProcessing = () => {
+    const startProcessing = async (imagePath: string) => {
         setStatus('processing');
-        setStatusText('Generating coarse 3D model...');
-        setTimeout(() => {
-            setStatus('ready');
-            setStatusText('Ready to enhance');
-            setActiveTool('editor'); // Auto-switch to editor
-        }, 3000);
+        setStatusText('Starting generation pipeline...');
+        setIsGenerating(true);
+
+        try {
+            const genRes = await fetch('/generate/', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ image_path: imagePath }),
+            });
+            const genData = await genRes.json();
+
+            if (!genData.job_id) throw new Error('Failed to start job');
+
+            // 3. Poll Status
+            pollStatus(genData.job_id);
+
+        } catch (error) {
+            setStatusText('Error: ' + String(error));
+        }
+    };
+
+    const pollStatus = (jobId: string) => {
+        const interval = setInterval(async () => {
+            try {
+                const res = await fetch(`/generate/status/${jobId}`);
+                const data = await res.json();
+
+                // Update Progress
+                setProgress(data.progress * 100);
+
+                // Map Backend Stage to Frontend Status
+                // Stages: uploaded, coarse_reconstruction, multi_view_generation, depth_estimation, diffusion_enhancement, refinement, export, completed
+
+                if (data.status === 'failed') {
+                    clearInterval(interval);
+                    setStatusText('Error: ' + data.error);
+                    return;
+                }
+
+                if (data.status === 'completed') {
+                    clearInterval(interval);
+                    setStatus('enhanced');
+                    setStatusText('Model Ready');
+                    setResultUrl(data.result.model_url); // Save PLY path
+                    setIsGenerating(false);
+                    // Trigger download or load into scene (Scene loading TBD)
+                    return;
+                }
+
+                // Status Mapping
+                if (data.stage === 'refinement' || data.stage === 'diffusion_enhancement') {
+                    setStatus('enhancing');
+                } else {
+                    setStatus('processing');
+                }
+                setStatusText(data.message || 'Processing...');
+
+            } catch (e) {
+                console.error("Polling error", e);
+            }
+        }, 1000);
     };
 
     const handleEnhance = () => {
-        setStatus('enhancing');
-        setStatusText('Initializing AI pipeline...');
-        setActiveTool('ai'); // Auto-switch to AI view
-
-        setTimeout(() => setStatusText('Refining textures (SDXL)...'), 1500);
-        setTimeout(() => setStatusText('Back-projecting details...'), 3000);
-        setTimeout(() => setStatusText('Optimizing Gaussian Splats...'), 4500);
-
-        setTimeout(() => {
-            setStatus('enhanced');
-            setStatusText('Model Enhanced');
-            // Update material to "premium" look
-            setMaterial(prev => ({ ...prev, color: '#11C5D9', roughness: 0.1, metalness: 1.0, emissive: 0.2 }));
-        }, 6000);
+        // In this real pipeline, enhancement is part of the main flow.
+        // But if user wants to re-enhance with text prompt?
+        // For now, this button might just be "Refine More" or disabled if already enhanced.
+        // Let's keep it as no-op or trigger a refinement-only endpoint if we had one.
+        alert("Pipeline already includes enhancement!");
     };
 
     const handleReset = () => {
         setStatus('idle');
         setProgress(0);
         setStatusText('');
+        setResultUrl(null);
         setMaterial({
             color: '#D4A857',
             roughness: 0.2,
@@ -102,38 +278,13 @@ export const Workspace = () => {
         });
         setPrompt('');
         setActiveTool('project');
+        if (inputRef.current) inputRef.current.value = '';
     };
 
     const handlePromptSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        if (!prompt.trim()) return;
-
-        setIsGenerating(true);
-        setStatusText('AI is editing model...');
-
-        // Mock AI Logic
-        setTimeout(() => {
-            const p = prompt.toLowerCase();
-            let newMaterial = { ...material };
-
-            if (p.includes('gold')) {
-                newMaterial = { ...material, color: '#FFD700', roughness: 0.2, metalness: 1.0 };
-            } else if (p.includes('rusty') || p.includes('rust')) {
-                newMaterial = { ...material, color: '#8B4513', roughness: 0.8, metalness: 0.2 };
-            } else if (p.includes('blue') || p.includes('ice')) {
-                newMaterial = { ...material, color: '#00FFFF', roughness: 0.1, metalness: 0.8, emissive: 0.5 };
-            } else if (p.includes('stone') || p.includes('rock')) {
-                newMaterial = { ...material, color: '#808080', roughness: 0.9, metalness: 0.1 };
-            } else {
-                // Default "Cyberpunk" random
-                newMaterial = { ...material, color: '#FF00FF', roughness: 0.2, metalness: 0.8 };
-            }
-
-            setMaterial(newMaterial);
-            setIsGenerating(false);
-            setStatusText('Model updated via AI');
-            setPrompt('');
-        }, 2000);
+        // Prompt logic for texture editing would go here (Future Feature)
+        alert("Text-to-texture editing coming soon!");
     };
 
     return (
@@ -158,22 +309,26 @@ export const Workspace = () => {
             {/* Center - Canvas */}
             <div className="canvas-area">
                 <ThreeCanvas autoRotate={material.autoRotate}>
-                    {/* 3D Content based on state */}
-                    {status === 'idle' || status === 'uploading' ? null : (
-                        <group>
-                            <mesh rotation={[0.5, 0.5, 0]}>
-                                <torusKnotGeometry args={[0.45, 0.15, 128, 32]} />
-                                <meshStandardMaterial
-                                    color={material.color}
-                                    roughness={material.roughness}
-                                    metalness={material.metalness}
-                                    emissive={material.color}
-                                    emissiveIntensity={material.emissive}
-                                    wireframe={material.wireframe}
-                                />
-                            </mesh>
-                        </group>
-                    )}
+                    <Suspense fallback={null}>
+                        {/* 3D Content based on state */}
+                        {resultUrl ? (
+                            <ModelViewer url={resultUrl} material={material} />
+                        ) : (status === 'idle' || status === 'uploading' ? null : (
+                            <group>
+                                <mesh rotation={[0.5, 0.5, 0]}>
+                                    <torusKnotGeometry args={[0.45, 0.15, 128, 32]} />
+                                    <meshStandardMaterial
+                                        color={material.color}
+                                        roughness={material.roughness}
+                                        metalness={material.metalness}
+                                        emissive={material.color}
+                                        emissiveIntensity={material.emissive}
+                                        wireframe={material.wireframe}
+                                    />
+                                </mesh>
+                            </group>
+                        ))}
+                    </Suspense>
                 </ThreeCanvas>
 
                 {/* Empty State / Upload Prompt */}
@@ -185,7 +340,14 @@ export const Workspace = () => {
                                 <h3 style={{ fontSize: '1.25rem', marginBottom: '8px' }}>Upload an Image</h3>
                                 <p style={{ color: 'var(--color-fog-silver)', fontSize: '0.875rem' }}>JPG or PNG. We'll turn it into 3D.</p>
                             </div>
-                            <Button onClick={handleUpload}>Select File</Button>
+                            <Button onClick={handleUploadClick}>Select File</Button>
+                            <input
+                                ref={inputRef}
+                                type="file"
+                                accept="image/png, image/jpeg"
+                                onChange={handleFileChange}
+                                style={{ display: 'none' }}
+                            />
                         </div>
                     </div>
                 )}

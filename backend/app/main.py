@@ -20,6 +20,17 @@ app = FastAPI(
     version="0.1.0"
 )
 
+from fastapi.staticfiles import StaticFiles
+from pathlib import Path
+
+# Mount static directories
+# Go up to project root
+project_root = Path(__file__).parent.parent.parent
+output_dir = project_root / "assets" / "outputs"
+output_dir.mkdir(parents=True, exist_ok=True)
+
+app.mount("/outputs", StaticFiles(directory=str(output_dir)), name="outputs")
+
 # CORS Configuration
 app.add_middleware(
     CORSMiddleware,
@@ -34,9 +45,9 @@ async def root():
     """Health check endpoint."""
     return {"message": "Glimpse3D Backend is running"}
 
-# TODO: Import and include routers
-# from app.routes import upload, generate, refine, export
-# app.include_router(upload.router)
-# app.include_router(generate.router)
-# app.include_router(refine.router)
-# app.include_router(export.router)
+# Import and include routers
+from .routes import upload, generate, refine, export
+app.include_router(upload.router)
+app.include_router(generate.router)
+app.include_router(refine.router)
+app.include_router(export.router)

@@ -15,6 +15,9 @@ logging.basicConfig(
 )
 logger = logging.getLogger("Glimpse3D-Reconstruct")
 
+# Add TripoSR to path
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../TripoSR")))
+
 import torch
 # Monkeypatch for transformers/torch compatibility issue (register_pytree_node)
 if not hasattr(torch.utils, "_pytree"):
@@ -85,16 +88,22 @@ def preprocess_image(image_path: str):
     else:
         logger.warning("rembg not installed. Skipping background removal. Ensure input is RGBA with clear BG.")
 
+    # Compositing Logic (Match TripoSR/run.py)
+    # Convert to float
+    image_np = np.array(image).astype(np.float32) / 255.0
+    
+    # If image has alpha, composite over gray (0.5)
+    if image_np.shape[2] == 4:
+        # RGB * Alpha + Background * (1 - Alpha)
+        image_np = image_np[:, :, :3] * image_np[:, :, 3:4] + (1 - image_np[:, :, 3:4]) * 0.5
+        image = Image.fromarray((image_np * 255.0).astype(np.uint8))
+    else:
+        # Already RGB, ensure 3 channels
+        image = image.convert("RGB")
+
     # Simple Resize (TripoSR usually needs foreground centering, keeping simple for now)
     # Target size: 512x512
     image = image.resize((512, 512), Image.BILINEAR)
-
-    # Convert to Tensor logic (TripoSR expects PIL image usually or tensor)
-    # The tsr.system.TSR wrapper usually takes a PIL image or batch.
-    # We will return the PIL image for now as it's the input to model(image).
-
-    # If we need to verify tensor metrics:
-    # tensor = torch.from_numpy(np.array(image)).permute(2, 0, 1).float() / 255.0
 
     return image
 
@@ -127,7 +136,8 @@ def run_inference(model, processed_image):
             with torch.no_grad():
                 scene_codes = model([processed_image], device=device)
                 # Extract mesh: resolution 256 is default
-                meshes = model.extract_mesh(scene_codes, resolution=256)
+                # P1.5 Update: Added has_vertex_color=True
+                meshes = model.extract_mesh(scene_codes, True, resolution=256)
                 return meshes[0] # Return the first mesh (trimesh object usually)
         except Exception as e:
             logger.error(f"Inference failed (fallback to dummy): {e}")
@@ -155,7 +165,8 @@ def sample_and_export(mesh, output_path: str):
     # 1. Get Points (XYZ)
     if hasattr(mesh, "sample"):
         # Trimesh object
-        points, _ = mesh.sample(100000) # Sample 100k points
+        # Trimesh sample returns just points by default
+        points = mesh.sample(100000) # Sample 100k points
     else:
         # SimpleMesh or fallback - just use vertices or dense grid
         points = mesh.vertices
@@ -192,6 +203,7 @@ def sample_and_export(mesh, output_path: str):
     dtype = [
         ('x', 'f4'), ('y', 'f4'), ('z', 'f4'),
         ('nx', 'f4'), ('ny', 'f4'), ('nz', 'f4'),
+        ('red', 'u1'), ('green', 'u1'), ('blue', 'u1'), # Standard Colors
         ('f_dc_0', 'f4'), ('f_dc_1', 'f4'), ('f_dc_2', 'f4'),
     ]
     # Add f_rest_0 to f_rest_44
@@ -217,6 +229,12 @@ def sample_and_export(mesh, output_path: str):
     elements['nx'] = 0 # Optional
     elements['ny'] = 0
     elements['nz'] = 0
+
+    # Colors: Write Standard RGB (White/Grey for visibility)
+    # Default to 200 (Light Grey) to be visible on dark background
+    elements['red'] = 200
+    elements['green'] = 200
+    elements['blue'] = 200
 
     elements['f_dc_0'] = features_dc[:, 0]
     elements['f_dc_1'] = features_dc[:, 1]

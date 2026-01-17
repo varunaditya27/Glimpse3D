@@ -1,0 +1,20 @@
+
+E:\SEM 3\EL\Glimpse3D>call "C:\Program Files (x86)\Microsoft Visual Studio\18\BuildTools\VC\Auxiliary\Build\vcvars64.bat" 
+**********************************************************************
+** Visual Studio 2026 Developer Command Prompt v18.2.0
+** Copyright (c) 2025 Microsoft Corporation
+**********************************************************************
+[DEBUG:ext\vcvars.bat] Found potential v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[DEBUG:ext\vcvars.bat] Testing v145 version file: 'Microsoft.VCToolsVersion.VC.14.50.18.0.txt'
+[vcvarsall.bat] Environment initialized for: 'x64'
+Traceback (most recent call last):
+  File "E:\SEM 3\EL\Glimpse3D\ai_modules\gsplat\train.py", line 13, in <module>
+    from ai_modules.gsplat.reconstruct import load_triposr_model, preprocess_image, run_inference, sample_and_export
+  File "E:\SEM 3\EL\Glimpse3D\ai_modules\gsplat\reconstruct.py", line 31, in <module>
+    from tsr.system import TSR
+  File "E:\SEM 3\EL\Glimpse3D\ai_modules\TripoSR\tsr\system.py", line 16, in <module>
+    from .models.isosurface import MarchingCubeHelper
+  File "E:\SEM 3\EL\Glimpse3D\ai_modules\TripoSR\tsr\models\isosurface.py", line 4, in <module>
+    class IsosurfaceHelper(nn.Module):
+                           ^^
+NameError: name 'nn' is not defined
