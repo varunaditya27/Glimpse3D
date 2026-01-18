@@ -30,9 +30,16 @@ def setup_logger(name: str = "glimpse3d", level: int = logging.INFO) -> logging.
     if logger.handlers:
         return logger
     
-    # Create console handler with formatting
+    # Create console handler with UTF-8 encoding for Unicode support (emojis, etc.)
     console_handler = logging.StreamHandler(sys.stdout)
     console_handler.setLevel(level)
+    
+    # Force UTF-8 encoding on Windows to support Unicode characters
+    if hasattr(console_handler.stream, 'reconfigure'):
+        try:
+            console_handler.stream.reconfigure(encoding='utf-8')
+        except Exception:
+            pass
     
     # Create formatter
     formatter = logging.Formatter(
@@ -43,12 +50,15 @@ def setup_logger(name: str = "glimpse3d", level: int = logging.INFO) -> logging.
     console_handler.setFormatter(formatter)
     logger.addHandler(console_handler)
     
-    # Optional: Add file handler
+    # Optional: Add file handler with UTF-8 encoding
     try:
         log_dir = Path("logs")
         log_dir.mkdir(exist_ok=True)
         
-        file_handler = logging.FileHandler(log_dir / "glimpse3d.log")
+        file_handler = logging.FileHandler(
+            log_dir / "glimpse3d.log",
+            encoding='utf-8'  # UTF-8 encoding for file as well
+        )
         file_handler.setLevel(level)
         file_handler.setFormatter(formatter)
         logger.addHandler(file_handler)

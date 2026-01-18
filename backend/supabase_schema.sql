@@ -33,7 +33,8 @@ CREATE TABLE projects (
     processed_image_url TEXT,
     final_model_url TEXT,
     total_processing_time FLOAT DEFAULT 0,
-    user_session_id TEXT -- Optional: for tracking across browser sessions
+    user_session_id TEXT, -- Optional: for tracking across browser sessions
+    validation_metadata JSONB -- Image validation metrics (blur score, object count, etc.)
 );
 
 -- Index for faster queries

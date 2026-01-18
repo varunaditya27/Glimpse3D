@@ -101,6 +101,28 @@ class DatabaseManager:
         response = supabase.table("projects").select("*").eq("id", project_id).execute()
         return response.data[0] if response.data else None
     
+    @staticmethod
+    def save_validation_metadata(
+        project_id: str,
+        validation_metadata: Dict[str, Any]
+    ):
+        """
+        Save image validation metadata to projects table.
+        
+        Args:
+            project_id: Project UUID
+            validation_metadata: Dict with validation metrics
+        """
+        supabase = get_supabase()
+        
+        # Store metadata as JSONB column
+        data = {
+            "validation_metadata": validation_metadata
+        }
+        
+        supabase.table("projects").update(data).eq("id", project_id).execute()
+        logger.info(f"Saved validation metadata for project {project_id}")
+    
     # ==================== MULTIVIEW GENERATION ====================
     
     @staticmethod
