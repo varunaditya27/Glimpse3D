@@ -66,4 +66,8 @@ app.include_router(refine.router, prefix="/api/v1")
 app.include_router(export.router, prefix="/api/v1")
 app.include_router(status.router, prefix="/api/v1")
 
+# Import and include compare router
+from app.routes import compare
+app.include_router(compare.router, prefix="/api/v1")
+
 logger.info("Glimpse3D Backend initialized successfully")

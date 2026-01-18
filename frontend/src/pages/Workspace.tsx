@@ -1,7 +1,8 @@
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { ThreeCanvas } from '../components/ThreeCanvas';
 import { Button } from '../components/Button';
-import { Upload, Sliders, Sparkles, Download, Maximize2, RotateCcw, Wand2, Folder } from 'lucide-react';
+import { Upload, Sliders, Sparkles, Download, Maximize2, RotateCcw, Wand2, Folder, GitCompare } from 'lucide-react';
 import { motion, AnimatePresence } from 'framer-motion';
 import clsx from 'clsx';
 
@@ -23,6 +24,8 @@ const ToolButton = ({ icon: Icon, label, active, onClick }: { icon: any, label: 
 );
 
 export const Workspace = () => {
+    const navigate = useNavigate();
+    
     // Tools: 'project', 'editor', 'ai', 'export'
     const [activeTool, setActiveTool] = useState('project');
     const [status, setStatus] = useState<'idle' | 'uploading' | 'processing' | 'ready' | 'enhancing' | 'enhanced'>('idle');
@@ -469,26 +472,45 @@ export const Workspace = () => {
 
                     {/* EXPORT VIEW */}
                     {activeTool === 'export' && (
-                        <div className="prop-group">
-                            <label className="prop-label">Export Options</label>
-                            <div className="prop-card">
-                                <div style={{ marginBottom: '12px' }}>
-                                    <label style={{ display: 'block', fontSize: '0.875rem', color: 'white', marginBottom: '8px' }}>Format</label>
-                                    <select style={{ width: '100%', padding: '8px', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-graphite-gray)', color: 'white' }}>
-                                        <option>GLB (Recommended)</option>
-                                        <option>OBJ</option>
-                                        <option>USDZ</option>
-                                        <option>Splat</option>
-                                    </select>
+                        <>
+                            <div className="prop-group">
+                                <label className="prop-label">Export Options</label>
+                                <div className="prop-card">
+                                    <div style={{ marginBottom: '12px' }}>
+                                        <label style={{ display: 'block', fontSize: '0.875rem', color: 'white', marginBottom: '8px' }}>Format</label>
+                                        <select style={{ width: '100%', padding: '8px', borderRadius: '8px', background: 'rgba(0,0,0,0.3)', border: '1px solid var(--color-graphite-gray)', color: 'white' }}>
+                                            <option>GLB (Recommended)</option>
+                                            <option>OBJ</option>
+                                            <option>USDZ</option>
+                                            <option>Splat</option>
+                                        </select>
+                                    </div>
+                                    <Button variant="outline" disabled={status !== 'enhanced'} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                                        <Download size={18} />
+                                        Download Model
+                                    </Button>
                                 </div>
-                                <Button variant="outline" disabled={status !== 'enhanced'} style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
-                                    <Download size={18} />
-                                    Download Model
-                                </Button>
                             </div>
-                        </div>
-                    )}
 
+                            {/* COMPARE MODELS SECTION */}
+                            <div className="prop-group">
+                                <label className="prop-label">Comparison</label>
+                                <div className="prop-card">
+                                    <p style={{ fontSize: '0.875rem', color: 'var(--color-fog-silver)', marginBottom: '12px' }}>
+                                        View multiple models side-by-side
+                                    </p>
+                                    <Button 
+                                        variant="outline" 
+                                        onClick={() => navigate('/compare')}
+                                        style={{ width: '100%', display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}
+                                    >
+                                        <GitCompare size={18} />
+                                        Compare Models
+                                    </Button>
+                                </div>
+                            </div>
+                        </>
+                    )}
                 </div>
             </div>
         </div>

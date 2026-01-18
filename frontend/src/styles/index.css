@@ -44,6 +44,12 @@ body {
     overflow-x: hidden;
 }
 
+#root {
+    width: 100%;
+    height: 100vh;
+    overflow: hidden;
+}
+
 /* Noise Overlay */
 body::after {
     content: "";
@@ -526,4 +532,18 @@ input:checked + .slider-toggle {
 input:checked + .slider-toggle:before {
     transform: translateX(20px);
     background-color: var(--color-carbon-black);
+}
+
+/* Spinner Animation */
+@keyframes spin {
+    from {
+        transform: rotate(0deg);
+    }
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+.animate-spin {
+    animation: spin 1s linear infinite;
 }

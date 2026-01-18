@@ -430,3 +430,177 @@ class DatabaseManager:
         
         logger.info(f"Saved export record for project {project_id} (format: {format})")
         return export_id
+    
+    # ==================== COMPARISON QUERIES ====================
+    
+    @staticmethod
+    def get_projects_for_comparison(limit: int = 50, status: Optional[str] = "completed") -> List[Dict]:
+        """
+        Get list of projects suitable for comparison.
+        
+        Args:
+            limit: Maximum number of projects to return
+            status: Filter by status (default: 'completed')
+        
+        Returns:
+            List of project dictionaries with essential comparison data
+        """
+        supabase = get_supabase()
+        
+        query = supabase.table("projects").select(
+            "id, original_image_url, processed_image_url, final_model_url, "
+            "status, created_at, total_processing_time"
+        )
+        
+        if status:
+            query = query.eq("status", status)
+        
+        response = query.order("created_at", desc=True).limit(limit).execute()
+        
+        projects = []
+        for project in response.data:
+            # Get latest model for this project
+            model_response = supabase.table("gaussian_splat_models")\
+                .select("model_file_url, version, num_splats, file_size_mb, is_final")\
+                .eq("project_id", project["id"])\
+                .order("version", desc=True)\
+                .limit(1)\
+                .execute()
+            
+            model_data = model_response.data[0] if model_response.data else None
+            
+            # Get quality metrics if available
+            metrics_response = supabase.table("enhancement_iterations")\
+                .select("overall_quality, psnr, ssim")\
+                .eq("project_id", project["id"])\
+                .order("iteration_number", desc=True)\
+                .limit(1)\
+                .execute()
+            
+            metrics = metrics_response.data[0] if metrics_response.data else None
+            
+            projects.append({
+                "id": project["id"],
+                "original_image_url": project.get("original_image_url"),
+                "processed_image_url": project.get("processed_image_url"),
+                "final_model_url": project.get("final_model_url"),
+                "latest_model_url": model_data.get("model_file_url") if model_data else None,
+                "status": project["status"],
+                "created_at": project["created_at"],
+                "total_processing_time": project.get("total_processing_time"),
+                "model_info": {
+                    "version": model_data.get("version") if model_data else None,
+                    "num_splats": model_data.get("num_splats") if model_data else None,
+                    "file_size_mb": model_data.get("file_size_mb") if model_data else None,
+                    "is_final": model_data.get("is_final") if model_data else False
+                } if model_data else None,
+                "quality_metrics": {
+                    "overall_quality": metrics.get("overall_quality") if metrics else None,
+                    "psnr": metrics.get("psnr") if metrics else None,
+                    "ssim": metrics.get("ssim") if metrics else None
+                } if metrics else None
+            })
+        
+        return projects
+    
+    @staticmethod
+    def get_project_comparison_data(project_id: str) -> Optional[Dict]:
+        """
+        Get comprehensive data for a single project for comparison view.
+        
+        Args:
+            project_id: Project UUID
+        
+        Returns:
+            Dictionary with project data, models, metrics, and multi-view counts
+        """
+        supabase = get_supabase()
+        
+        # Get project basic info
+        project = DatabaseManager.get_project(project_id)
+        if not project:
+            return None
+        
+        # Get latest model
+        model_response = supabase.table("gaussian_splat_models")\
+            .select("*")\
+            .eq("project_id", project_id)\
+            .order("version", desc=True)\
+            .limit(1)\
+            .execute()
+        
+        latest_model = model_response.data[0] if model_response.data else None
+        
+        # Get all models count
+        all_models_response = supabase.table("gaussian_splat_models")\
+            .select("id", count="exact")\
+            .eq("project_id", project_id)\
+            .execute()
+        
+        models_count = all_models_response.count or 0
+        
+        # Get multi-view count
+        multiview_response = supabase.table("multiview_generation")\
+            .select("id", count="exact")\
+            .eq("project_id", project_id)\
+            .execute()
+        
+        multiview_count = multiview_response.count or 0
+        
+        # Get depth map count
+        depth_response = supabase.table("depth_maps")\
+            .select("id", count="exact")\
+            .eq("project_id", project_id)\
+            .execute()
+        
+        depth_count = depth_response.count or 0
+        
+        # Get latest enhancement iteration
+        iteration_response = supabase.table("enhancement_iterations")\
+            .select("*")\
+            .eq("project_id", project_id)\
+            .order("iteration_number", desc=True)\
+            .limit(1)\
+            .execute()
+        
+        latest_iteration = iteration_response.data[0] if iteration_response.data else None
+        
+        # Get all iterations count
+        all_iterations_response = supabase.table("enhancement_iterations")\
+            .select("id", count="exact")\
+            .eq("project_id", project_id)\
+            .execute()
+        
+        iterations_count = all_iterations_response.count or 0
+        
+        return {
+            "id": project["id"],
+            "status": project["status"],
+            "current_step": project.get("current_step"),
+            "original_image_url": project.get("original_image_url"),
+            "processed_image_url": project.get("processed_image_url"),
+            "final_model_url": project.get("final_model_url"),
+            "created_at": project["created_at"],
+            "total_processing_time": project.get("total_processing_time", 0),
+            "model": {
+                "url": latest_model.get("model_file_url") if latest_model else None,
+                "version": latest_model.get("version") if latest_model else 0,
+                "num_splats": latest_model.get("num_splats") if latest_model else None,
+                "file_size_mb": latest_model.get("file_size_mb") if latest_model else None,
+                "is_final": latest_model.get("is_final") if latest_model else False,
+                "total_versions": models_count
+            },
+            "metrics": {
+                "overall_quality": latest_iteration.get("overall_quality") if latest_iteration else None,
+                "psnr": latest_iteration.get("psnr") if latest_iteration else None,
+                "ssim": latest_iteration.get("ssim") if latest_iteration else None,
+                "lpips": latest_iteration.get("lpips") if latest_iteration else None,
+                "avg_depth_consistency": latest_iteration.get("avg_depth_consistency") if latest_iteration else None,
+                "avg_feature_similarity": latest_iteration.get("avg_feature_similarity") if latest_iteration else None
+            } if latest_iteration else None,
+            "pipeline_progress": {
+                "multiview_count": multiview_count,
+                "depth_count": depth_count,
+                "iterations_count": iterations_count
+            }
+        }
