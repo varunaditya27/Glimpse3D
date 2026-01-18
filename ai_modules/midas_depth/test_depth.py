@@ -44,6 +44,14 @@ from midas_depth.depth_confidence import (
     get_reliable_depth_mask,
 )
 
+from midas_depth.edge_refinement import (
+    refine_depth_edges,
+    detect_depth_edges,
+    guided_filter_depth,
+    remove_flying_pixels,
+    adaptive_edge_refinement,
+)
+
 
 def create_test_image(size=(256, 256)) -> Image.Image:
     """Create a simple test image with gradient."""
@@ -383,6 +391,86 @@ class TestEdgeCases:
             DepthEstimator(model_type="InvalidModel")
 
 
+class TestEdgeRefinement:
+    """Tests for the edge refinement module."""
+    
+    def test_refine_depth_edges_output_shape(self):
+        """Test that refined depth has same shape as input."""
+        depth = np.random.rand(100, 100).astype(np.float32)
+        rgb = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+        
+        refined = refine_depth_edges(depth, rgb)
+        
+        assert refined.shape == depth.shape
+        assert refined.dtype == np.float32
+    
+    def test_refine_depth_edges_range(self):
+        """Test that refined depth stays in [0, 1]."""
+        depth = np.random.rand(100, 100).astype(np.float32)
+        rgb = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+        
+        refined = refine_depth_edges(depth, rgb)
+        
+        assert refined.min() >= 0.0
+        assert refined.max() <= 1.0
+    
+    def test_detect_depth_edges(self):
+        """Test edge detection."""
+        # Create depth with sharp edge
+        depth = np.zeros((100, 100), dtype=np.float32)
+        depth[:, 50:] = 1.0
+        
+        edges = detect_depth_edges(depth, threshold=0.05)
+        
+        assert edges.dtype == bool
+        assert edges.shape == depth.shape
+        # Should detect edge near x=50
+        assert np.any(edges[:, 48:52])
+    
+    def test_guided_filter(self):
+        """Test guided filter depth refinement."""
+        depth = np.random.rand(100, 100).astype(np.float32)
+        rgb = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+        
+        filtered = guided_filter_depth(depth, rgb)
+        
+        assert filtered.shape == depth.shape
+        assert filtered.min() >= 0.0
+        assert filtered.max() <= 1.0
+    
+    def test_remove_flying_pixels(self):
+        """Test flying pixel removal."""
+        depth = np.random.rand(100, 100).astype(np.float32) * 0.5 + 0.25
+        rgb = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+        
+        # Add some flying pixels
+        depth[20:25, 20:25] = 0.9
+        
+        cleaned = remove_flying_pixels(depth, rgb)
+        
+        assert cleaned.shape == depth.shape
+        assert cleaned.dtype == np.float32
+    
+    def test_adaptive_refinement(self):
+        """Test adaptive edge refinement."""
+        depth = np.random.rand(100, 100).astype(np.float32)
+        rgb = np.random.randint(0, 255, (100, 100, 3), dtype=np.uint8)
+        
+        refined = adaptive_edge_refinement(depth, rgb)
+        
+        assert refined.shape == depth.shape
+        assert refined.min() >= 0.0
+        assert refined.max() <= 1.0
+    
+    def test_shape_mismatch_error(self):
+        """Test error when depth and RGB shapes don't match."""
+        depth = np.random.rand(100, 100).astype(np.float32)
+        rgb = np.random.randint(0, 255, (50, 50, 3), dtype=np.uint8)
+        
+        with pytest.raises(ValueError):
+            refine_depth_edges(depth, rgb)
+
+
 # ============================================================================
 # Quick manual test
 # ============================================================================
@@ -547,10 +635,95 @@ def run_confidence_test():
     return True
 
 
+def run_edge_refinement_test():
+    """Test depth edge refinement."""
+    print("\n" + "=" * 60)
+    print("Testing Edge Refinement (Novel Feature)")
+    print("=" * 60)
+    
+    # Create test depth with sharp edge
+    print("\n1. Creating test depth with sharp edge...")
+    depth = np.ones((128, 128), dtype=np.float32) * 0.3
+    depth[:, 64:] = 0.8  # Sharp edge at x=64
+    depth[40:80, 40:60] = 0.5  # Step in middle
+    
+    # Create test RGB matching the depth edge
+    rgb = np.ones((128, 128, 3), dtype=np.uint8) * 100
+    rgb[:, 64:] = [200, 200, 200]  # RGB edge aligns with depth edge
+    rgb[40:80, 40:60] = [150, 150, 150]
+    
+    print(f"   Depth shape: {depth.shape}")
+    print(f"   RGB shape: {rgb.shape}")
+    print(f"   Depth range: [{depth.min():.3f}, {depth.max():.3f}]")
+    
+    # Detect edges before refinement
+    print("\n2. Detecting edges before refinement...")
+    edges_before = detect_depth_edges(depth, threshold=0.05)
+    edge_pixel_count_before = edges_before.sum()
+    print(f"   Edge pixels detected: {edge_pixel_count_before}")
+    
+    # Apply refinement
+    print("\n3. Applying edge refinement...")
+    refined = refine_depth_edges(depth, rgb, sigma_space=10.0, sigma_color=0.1)
+    print(f"   Refined depth range: [{refined.min():.3f}, {refined.max():.3f}]")
+    
+    # Detect edges after refinement
+    print("\n4. Detecting edges after refinement...")
+    edges_after = detect_depth_edges(refined, threshold=0.05)
+    edge_pixel_count_after = edges_after.sum()
+    print(f"   Edge pixels detected: {edge_pixel_count_after}")
+    
+    # Measure edge preservation
+    print("\n5. Measuring edge preservation...")
+    edge_region = depth[:, 62:66]
+    refined_edge_region = refined[:, 62:66]
+    
+    original_gradient = np.abs(np.diff(edge_region, axis=1)).mean()
+    refined_gradient = np.abs(np.diff(refined_edge_region, axis=1)).mean()
+    
+    print(f"   Original edge gradient: {original_gradient:.4f}")
+    print(f"   Refined edge gradient: {refined_gradient:.4f}")
+    print(f"   Edge sharpness preserved: {(refined_gradient/original_gradient)*100:.1f}%")
+    
+    # Test other refinement methods
+    print("\n6. Testing other refinement methods...")
+    
+    guided = guided_filter_depth(depth, rgb)
+    print(f"   ✅ Guided filter: range [{guided.min():.3f}, {guided.max():.3f}]")
+    
+    adaptive = adaptive_edge_refinement(depth, rgb)
+    print(f"   ✅ Adaptive refinement: range [{adaptive.min():.3f}, {adaptive.max():.3f}]")
+    
+    cleaned = remove_flying_pixels(depth, rgb)
+    print(f"   ✅ Flying pixel removal: range [{cleaned.min():.3f}, {cleaned.max():.3f}]")
+    
+    # Save outputs
+    print("\n7. Saving outputs...")
+    output_dir = "test_output"
+    os.makedirs(output_dir, exist_ok=True)
+    
+    np.save(os.path.join(output_dir, "edge_depth_original.npy"), depth)
+    np.save(os.path.join(output_dir, "edge_depth_refined.npy"), refined)
+    np.save(os.path.join(output_dir, "edge_depth_guided.npy"), guided)
+    np.save(os.path.join(output_dir, "edge_depth_adaptive.npy"), adaptive)
+    
+    from PIL import Image
+    Image.fromarray(rgb).save(os.path.join(output_dir, "edge_rgb.png"))
+    
+    print(f"   Saved to: {output_dir}/")
+    
+    print("\n" + "=" * 60)
+    print("✅ Edge refinement test completed!")
+    print("=" * 60)
+    
+    return True
+
+
 if __name__ == "__main__":
     run_quick_test()
     run_alignment_test()
     run_confidence_test()
+    run_edge_refinement_test()
     print("\n" + "=" * 60)
     print("✅ All tests completed!")
     print("=" * 60)

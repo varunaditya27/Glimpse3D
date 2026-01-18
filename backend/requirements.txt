@@ -12,4 +12,6 @@ transformers
 accelerate
 scipy
 plyfile
+supabase
+python-dotenv
 # gsplat (install from source or specific wheel)

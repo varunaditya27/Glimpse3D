@@ -156,10 +156,76 @@ python depth_confidence.py -d depth.npy -i image.png -o confidence_output/
 ### Confidence Factors
 
 | Factor | Low Confidence When | Why |
-|--------|--------------------|----||
+|--------|--------------------|-----|
 | **Edge** | High depth gradient | MiDaS blurs depth at boundaries |
 | **Texture** | Flat RGB (no texture) | Hard to match in stereo/multi-view |
 | **Range** | Depth near 0 or 1 | Extreme values often noisy |
+
+---
+
+## Novel Feature: Edge Refinement
+
+**Problem**: MiDaS produces smooth depth that blurs object boundaries, causing "flying pixels" (thin structures connecting foreground/background in 3D reconstruction).
+
+**Solution**: RGB-guided bilateral filtering preserves sharp edges at object boundaries while smoothing flat regions.
+
+### Usage
+
+```python
+from midas_depth import refine_depth_edges, detect_depth_edges
+
+# Basic refinement
+depth_refined = refine_depth_edges(
+    depth, rgb,
+    sigma_space=15.0,    # Spatial smoothing (pixels)
+    sigma_color=0.1      # Depth difference tolerance
+)
+
+# Edge detection
+edges = detect_depth_edges(depth, threshold=0.05)
+
+# Alternative methods
+guided = guided_filter_depth(depth, rgb)           # Faster than bilateral
+adaptive = adaptive_edge_refinement(depth, rgb)    # Uses confidence map
+cleaned = remove_flying_pixels(depth, rgb)         # Removes outliers
+```
+
+### CLI
+
+```bash
+# Bilateral filter (default)
+python edge_refinement.py -d depth.npy -rgb image.png -o refined.npy
+
+# Guided filter (faster)
+python edge_refinement.py -d depth.npy -rgb image.png -m guided
+
+# Adaptive refinement
+python edge_refinement.py -d depth.npy -rgb image.png -m adaptive
+
+# Remove flying pixels
+python edge_refinement.py -d depth.npy -rgb image.png -m flying_pixels
+
+# Multi-scale refinement
+python edge_refinement.py -d depth.npy -rgb image.png -m multiscale
+```
+
+### Available Functions
+
+| Function | Purpose |
+|----------|---------|
+| `refine_depth_edges()` | RGB-guided bilateral filter (main method) |
+| `detect_depth_edges()` | Sobel-based edge detection |
+| `edge_preserving_smooth()` | Anisotropic diffusion |
+| `guided_filter_depth()` | Fast guided filter alternative |
+| `adaptive_edge_refinement()` | Confidence-weighted filtering |
+| `remove_flying_pixels()` | Outlier removal via inpainting |
+| `multi_scale_refinement()` | Multi-resolution pyramid |
+
+### When to Use
+
+- ✅ **Always use** before backprojection (prevents flying pixels)
+- ✅ **Use after** multi-view fusion (clean up merged depth)
+- ✅ **Use** `remove_flying_pixels()` if 3D model has thin artifacts
 
 ---
 
@@ -171,6 +237,7 @@ midas_depth/
 ├── run_depth.py          # Core depth estimation
 ├── depth_alignment.py    # Novel: Multi-view scale alignment
 ├── depth_confidence.py   # Novel: Confidence-weighted depth
+├── edge_refinement.py    # Novel: RGB-guided edge refinement
 ├── test_depth.py         # Unit tests
 ├── requirements.txt      # Dependencies
 └── README.md             # This file

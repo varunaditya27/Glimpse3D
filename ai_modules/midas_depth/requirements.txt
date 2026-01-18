@@ -14,7 +14,7 @@ torchvision>=0.15.0
 # Image processing
 Pillow>=9.0.0
 numpy>=1.21.0
-opencv-python>=4.5.0
+opencv-contrib-python>=4.5.0
 scipy>=1.7.0
 
 # MiDaS model dependencies (auto-installed via torch.hub, but listed for reference)
