@@ -155,7 +155,7 @@ class SyncDreamerService:
         crop_size: int = 200,
         cfg_scale: float = 2.0,
         sample_num: int = 1,
-        batch_view_num: int = 8,
+        batch_view_num: int = 1,
         sample_steps: int = 50,
         seed: int = 42
     ) -> List[Image.Image]:

@@ -1,0 +1,48 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+share/python-wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+MANIFEST
+
+# Virtual Environment
+venv/
+env/
+ENV/
+.env
+.venv
+
+# IDE
+.vscode/
+.idea/
+
+# Project Specific
+*.ckpt
+*.pt
+*.pth
+*.bin
+*.onnx
+*.safetensors
+*.part
+ai_modules/sync_dreamer/ckpt/
+outputs/
+logs/
+*.log
+training_log*.txt
