@@ -17,6 +17,9 @@ def refine_model(gs_model, target_images, cameras, iterations=100):
         target_images: List of (C, H, W) tensors (GT images)
         cameras: List of camera dicts {'K': (3,3), 'w2c': (4,4), 'image_height': H, 'image_width': W}
         iterations: Number of steps
+    
+    Returns:
+        Refined GaussianModel
     """
     device = gs_model.get_xyz.device
     
@@ -50,94 +53,83 @@ def refine_model(gs_model, target_images, cameras, iterations=100):
     optimizer = optim.Adam(params, lr=0.0, eps=1e-15)
     
     # 2. Optimization Loop
-    progress_bar = tqdm(range(iterations), desc="Optimizing")
-    
-    # gsplat rasterization usually expects:
-    # means, quats, scales, opacities, colors, viewmats, Ks, width, height...
+    progress_bar = tqdm(range(iterations), desc="Optimizing Gaussians")
     
     for i in range(iterations):
         optimizer.zero_grad()
         
-        # We only have 1 view for now mostly
+        # Cycle through views
         view_idx = i % len(cameras)
         gt_image = target_images[view_idx]
         cam = cameras[view_idx]
         
-        H, W = cam['image_width'], cam['image_height'] # Swapped? Check keys.
-        H, W = cam['image_height'], cam['image_width']
+        H = cam['image_height']
+        W = cam['image_width']
         
-        K = cam['K'].unsqueeze(0) # (1, 3, 3)
-        w2c = cam['w2c'].unsqueeze(0) # (1, 4, 4)
+        K = cam['K'].unsqueeze(0).to(device)  # (1, 3, 3)
+        w2c = cam['w2c'].unsqueeze(0).to(device)  # (1, 4, 4)
         
-        # Prepare inputs
-        means3d = gs_model.get_xyz
-        scales = gs_model.get_scaling
-        quats = gs_model.get_rotation
-        opacities = gs_model.get_opacity
+        # Prepare Gaussian parameters
+        means3d = gs_model.get_xyz                    # (N, 3)
+        scales = gs_model.get_scaling                 # (N, 3)
+        quats = gs_model.get_rotation                 # (N, 4) - must be wxyz
+        opacities = gs_model.get_opacity              # (N, 1) or (N,)
         
-        # Simple color handling (DC only for simplicity if SH fails, but we try SH)
-        # gsplat 1.0+ handles SH via spherical_harmonics typically, or expects precomputed colors.
-        # rasterization() signature varies.
-        # Let's try to assume it takes 'colors' which we precompute for now to be safe,
-        # OR 1.0+ takes SH.
-        # We will iterate and find the right call.
+        # ✅ FIXED: Ensure correct tensor shapes for gsplat v1.2.0
+        # opacities must be (N,) not (N, 1)
+        if opacities.dim() == 2:
+            opacities = opacities.squeeze(-1)
         
-        # For this version, let's assume we precompute colors from SH (approx) or just use DC.
-        colors = gs_model.get_features_dc # (N, 3) - Only DC
+        # ✅ FIXED: Normalize quaternions (gsplat expects normalized wxyz)
+        quats_normalized = quats / (torch.norm(quats, dim=-1, keepdim=True) + 1e-8)
         
-        # Rasterize
+        # Get colors (DC only for initial implementation)
+        colors = gs_model.get_features_dc  # (N, 3)
+        
+        # Rasterize using gsplat v1.2.0 API
         try:
-            # Note: inputs need to be contiguous and on device
-            # Check if gsplat.rasterization exists
-            if hasattr(gsplat, "rasterization"):
-                # Usually: (means, quats, scales, opacities, colors, viewmats, Ks, width, height)
-                # Note: gsplat often takes [N, ...] and batches via viewmats [B, 4, 4]
-                
-                # Check signature roughly by trying
-                # We need to reshape for batch if needed. gsplat 1.0 usually supports B=1.
-                
-                # IMPORTANT: gsplat v1.0.0 uses rasterization(means, quats, scales, opacities, colors, viewmats, Ks, width, height, ...)
-                # colors is (B, N, 3) or (N, 3)
-                
-                # Forward
-                rendered_images, alphas, info = gsplat.rasterization(
-                    means=means3d,
-                    quats=quats,
-                    scales=scales,
-                    opacities=opacities.flatten(),
-                    colors=colors,
-                    viewmats=w2c, # (1, 4, 4)
-                    Ks=K,         # (1, 3, 3)
-                    width=W,
-                    height=H,
-                    packed=False # Assume non-packed for simplicity
-                )
-                
-                # rendered_images: (B, H, W, 3)
-                image = rendered_images[0].permute(2, 0, 1) # (3, H, W)
-                
-            else:
-                # Fallback or error
-                logger.error("gsplat.rasterization not found!")
-                break
+            # gsplat.rasterization() signature:
+            # (means, quats, scales, opacities, colors, viewmats, Ks, width, height, ...)
+            rendered_images, alphas, meta = gsplat.rasterization(
+                means=means3d.contiguous(),
+                quats=quats_normalized.contiguous(),
+                scales=scales.contiguous(),
+                opacities=opacities.contiguous(),
+                colors=colors.contiguous(),
+                viewmats=w2c.contiguous(),
+                Ks=K.contiguous(),
+                width=W,
+                height=H,
+                near_plane=0.01,
+                far_plane=100.0,
+                packed=False,
+                render_mode="RGB"
+            )
+            
+            # rendered_images: (B, H, W, 3) -> (3, H, W)
+            image = rendered_images[0].permute(2, 0, 1)
                 
         except Exception as e:
-            logger.error(f"Rasterization failed: {e}")
+            logger.error(f"Rasterization failed at iteration {i}: {e}")
             raise e
             
-        # Loss
-        l1_loss = torch.nn.functional.l1_loss(image, gt_image)
-        loss = l1_loss 
-        # Add SSIM here if available (from pytorch_msssim import ssim)
+        # Loss: L1 + optional SSIM
+        l1_loss = torch.nn.functional.l1_loss(image, gt_image.to(device))
+        loss = l1_loss
+        
+        # Optional: Add SSIM loss for better perceptual quality
+        # from pytorch_msssim import ssim
+        # ssim_loss = 1 - ssim(image.unsqueeze(0), gt_image.unsqueeze(0).to(device), data_range=1.0)
+        # loss = 0.8 * l1_loss + 0.2 * ssim_loss
         
         loss.backward()
         optimizer.step()
         
-        progress_bar.set_postfix({"Loss": f"{loss.item():.4f}"})
-        
-        # Simple Density Control (Placeholder)
-        # if i % 100 == 0:
-        #     pass
+        progress_bar.set_postfix({
+            "Loss": f"{loss.item():.4f}",
+            "View": f"{view_idx}/{len(cameras)}"
+        })
             
     progress_bar.close()
+    logger.info(f"Optimization complete. Final loss: {loss.item():.4f}")
     return gs_model
