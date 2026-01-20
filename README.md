@@ -38,7 +38,7 @@ This makes Glimpse3D both:
 
 Generate a base 3D Gaussian Splat model in **5–10 seconds**.
 
-### **✔ Multi‑View Understanding (Zero‑123)**
+### **✔ Multi‑View Understanding (SyncDreamer)**
 
 Optionally synthesize novel views from a single image to infer unseen sides.
 
