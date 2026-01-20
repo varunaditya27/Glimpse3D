@@ -48,6 +48,16 @@ from .depth_confidence import (
     get_reliable_depth_mask,
 )
 
+from .edge_refinement import (
+    refine_depth_edges,
+    detect_depth_edges,
+    edge_preserving_smooth,
+    guided_filter_depth,
+    adaptive_edge_refinement,
+    remove_flying_pixels,
+    multi_scale_refinement,
+)
+
 __all__ = [
     # Core depth estimation
     "DepthEstimator",
@@ -69,6 +79,14 @@ __all__ = [
     "weighted_depth_fusion",
     "visualize_confidence",
     "get_reliable_depth_mask",
+    # Novel: Edge refinement
+    "refine_depth_edges",
+    "detect_depth_edges",
+    "edge_preserving_smooth",
+    "guided_filter_depth",
+    "adaptive_edge_refinement",
+    "remove_flying_pixels",
+    "multi_scale_refinement",
 ]
 
-__version__ = "1.2.0"
+__version__ = "1.3.0"

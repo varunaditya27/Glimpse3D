@@ -6,10 +6,14 @@ torch
 torchvision
 numpy
 Pillow
-rembg
+rembg[cpu]>=2.0.62
+opencv-python>=4.8.0
+scikit-image>=0.22.0
 diffusers
 transformers
 accelerate
 scipy
 plyfile
+supabase
+python-dotenv
 # gsplat (install from source or specific wheel)
