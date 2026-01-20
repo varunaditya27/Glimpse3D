@@ -182,35 +182,83 @@ class BackProjector:
         """
         Accumulate residuals to splat updates using contribution map.
         
+        Uses scatter_add for efficient GPU-based accumulation of per-pixel
+        residuals to their contributing splats.
+        
         Args:
             weighted_residuals: (H, W, 3) weighted pixel differences
             splat_contributions: (H, W, K, 2) - last dim is [splat_idx, weight]
+                                 OR (H, W, K) for simplified single-weight format
             alpha_map: (H, W) rendering alpha values
             num_splats: Total number of splats
         
         Returns:
-            color_updates, opacity_updates, weights
+            color_updates: (N, 3) accumulated color updates
+            opacity_updates: (N,) accumulated opacity updates  
+            weights: (N,) normalization weights per splat
         """
         H, W, _ = weighted_residuals.shape
-        K = splat_contributions.shape[2] if len(splat_contributions.shape) == 4 else 1
         
         color_updates = torch.zeros(num_splats, 3, device=self.device)
         opacity_updates = torch.zeros(num_splats, device=self.device)
         weights = torch.zeros(num_splats, device=self.device)
         
-        # Simplified accumulation (in production, use optimized indexing)
-        # This assumes splat_contributions format from renderer
+        # Handle different contribution tensor formats
+        if len(splat_contributions.shape) == 4:
+            # Format: (H, W, K, 2) where [..., 0] = index, [..., 1] = weight
+            K = splat_contributions.shape[2]
+            indices = splat_contributions[..., 0].long()  # (H, W, K)
+            contrib_weights = splat_contributions[..., 1]  # (H, W, K)
+        elif len(splat_contributions.shape) == 3:
+            # Simplified format: (H, W, K) just indices, uniform weight
+            K = splat_contributions.shape[2]
+            indices = splat_contributions.long()  # (H, W, K)
+            contrib_weights = torch.ones_like(indices, dtype=torch.float32) / K
+        else:
+            # Fallback: no contribution data available
+            return color_updates, opacity_updates, weights
         
-        # Flatten spatial dimensions for easier processing
-        residuals_flat = weighted_residuals.view(-1, 3)  # (H*W, 3)
-        alpha_flat = alpha_map.view(-1)  # (H*W,)
+        # Validate indices
+        valid_mask = (indices >= 0) & (indices < num_splats)
         
-        # For each pixel, distribute updates to contributing splats
-        # Note: This is a simplified version. In production, you'd use
-        # the actual contribution data from the rasterizer
+        # Flatten for scatter operations
+        indices_flat = indices.view(-1)  # (H*W*K,)
+        contrib_weights_flat = contrib_weights.view(-1)  # (H*W*K,)
+        valid_flat = valid_mask.view(-1)  # (H*W*K,)
         
-        # Placeholder: Use a scatter operation for efficiency
-        # In real implementation, this comes from the gsplat rasterizer output
+        # Expand residuals for each contributing splat
+        # residuals: (H, W, 3) -> (H, W, 1, 3) -> (H, W, K, 3)
+        residuals_expanded = weighted_residuals.unsqueeze(2).expand(-1, -1, K, -1)
+        residuals_flat = residuals_expanded.reshape(-1, 3)  # (H*W*K, 3)
+        
+        # Expand alpha for opacity updates
+        alpha_expanded = alpha_map.unsqueeze(-1).expand(-1, -1, K)
+        alpha_flat = alpha_expanded.reshape(-1)  # (H*W*K,)
+        
+        # Filter to valid contributions
+        valid_indices = indices_flat[valid_flat]
+        valid_contrib = contrib_weights_flat[valid_flat]
+        valid_residuals = residuals_flat[valid_flat]  # (valid_count, 3)
+        valid_alpha = alpha_flat[valid_flat]
+        
+        if valid_indices.numel() == 0:
+            return color_updates, opacity_updates, weights
+        
+        # Weight residuals by contribution strength
+        weighted_valid_residuals = valid_residuals * valid_contrib.unsqueeze(-1)
+        
+        # Scatter add for color updates: accumulate weighted residuals per splat
+        # Expand indices for 3 color channels
+        index_expanded = valid_indices.unsqueeze(-1).expand(-1, 3)  # (valid_count, 3)
+        color_updates.scatter_add_(0, index_expanded, weighted_valid_residuals)
+        
+        # Scatter add for opacity updates: based on residual magnitude
+        residual_magnitude = torch.norm(valid_residuals, dim=1)  # (valid_count,)
+        opacity_delta = residual_magnitude * valid_contrib * 0.1  # Small opacity adjustments
+        opacity_updates.scatter_add_(0, valid_indices, opacity_delta)
+        
+        # Scatter add for normalization weights
+        weights.scatter_add_(0, valid_indices, valid_contrib)
         
         return color_updates, opacity_updates, weights
     

@@ -131,7 +131,7 @@ def clear_gpu_memory():
         print(f"🧹 GPU memory: {allocated:.2f} GB allocated, {reserved:.2f} GB reserved")
 
 
-def download_file(url: str, output_path: str, use_aria2: bool = True) -> bool:
+def download_file(url: str, output_path, use_aria2: bool = True) -> bool:
     """
     Download a file with progress display.
     
