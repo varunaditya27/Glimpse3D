@@ -4,4 +4,11 @@ import react from '@vitejs/plugin-react-swc'
 // https://vite.dev/config/
 export default defineConfig({
   plugins: [react()],
+  server: {
+    proxy: {
+      '/upload': 'http://localhost:8000',
+      '/generate': 'http://localhost:8000',
+      '/export': 'http://localhost:8000',
+    }
+  }
 })

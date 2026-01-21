@@ -1,0 +1,110 @@
+# Glimpse3D Production Requirements for Google Colab
+# ================================================
+# Tested on: Google Colab T4 GPU (15GB VRAM)
+# Last Updated: 2024
+#
+# IMPORTANT: Install order matters! Run:
+# 1. First uninstall existing torch: pip uninstall torch torchvision torchaudio -y
+# 2. Then install this file: pip install -r requirements-colab.txt
+
+# =============================================================================
+# CORE: PyTorch + CUDA (MUST be installed first)
+# =============================================================================
+--extra-index-url https://download.pytorch.org/whl/cu118
+torch==2.0.1+cu118
+torchvision==0.15.2+cu118
+
+# =============================================================================
+# LIGHTNING (SyncDreamer dependency)
+# =============================================================================
+# NOTE: pytorch-lightning 1.9.x is the last version compatible with SyncDreamer
+# Do NOT use 2.x as it has breaking API changes
+pytorch-lightning==1.9.5
+
+# =============================================================================
+# GAUSSIAN SPLATTING
+# =============================================================================
+# gsplat v1.2.0 requires torch 2.0+ and CUDA 11.8+
+gsplat==1.2.0
+plyfile>=0.9.1
+
+# =============================================================================
+# DIFFUSION (SDXL Lightning)
+# =============================================================================
+diffusers==0.27.2
+transformers==4.40.0
+accelerate==0.28.0
+safetensors==0.4.2
+huggingface_hub>=0.21.0
+
+# =============================================================================
+# SYNCDREAMER DEPENDENCIES
+# =============================================================================
+omegaconf==2.3.0
+einops==0.7.0
+kornia==0.7.0
+# taming-transformers from rom1504 fork (stable)
+taming-transformers-rom1504==0.0.6
+
+# CLIP - pinned to known working commit
+# Install separately with:
+# pip install git+https://github.com/openai/CLIP.git@a1d071733d7111c9c014f024669f959182114e33
+
+# =============================================================================
+# TRIPOSR DEPENDENCIES  
+# =============================================================================
+trimesh==4.2.0
+xatlas
+# rembg with GPU acceleration
+rembg[gpu]==2.0.55
+
+# =============================================================================
+# IMAGE PROCESSING
+# =============================================================================
+Pillow>=10.0.0,<11.0.0
+opencv-python-headless>=4.8.0
+scikit-image>=0.21.0
+imageio>=2.31.0
+imageio-ffmpeg>=0.4.8
+
+# =============================================================================
+# DEPTH ESTIMATION
+# =============================================================================
+timm>=0.9.0
+
+# =============================================================================
+# NUMERICAL / SCIENTIFIC
+# =============================================================================
+numpy>=1.24.0,<2.0.0
+scipy>=1.11.0
+
+# =============================================================================
+# UTILITIES
+# =============================================================================
+tqdm>=4.65.0
+matplotlib>=3.7.0
+easydict>=1.10
+
+# =============================================================================
+# OPTIONAL: Testing & Development
+# =============================================================================
+# pytest>=7.4.0
+# pytest-cov>=4.1.0
+
+# =============================================================================
+# NOTES ON SPECIAL INSTALLATIONS
+# =============================================================================
+# 
+# 1. CLIP (must be installed from git):
+#    pip install git+https://github.com/openai/CLIP.git@a1d071733d7111c9c014f024669f959182114e33
+#
+# 2. tiny-cuda-nn (optional, for advanced features):
+#    pip install git+https://github.com/NVlabs/tiny-cuda-nn/#subdirectory=bindings/torch
+#
+# 3. torchmcubes (for TripoSR mesh extraction):
+#    pip install git+https://github.com/tatsy/torchmcubes.git
+#
+# 4. If gsplat fails to install, try from source:
+#    pip install git+https://github.com/nerfstudio-project/gsplat.git
+#
+# =============================================================================

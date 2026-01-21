@@ -103,6 +103,42 @@ class DepthService:
         confidence = estimate_depth_confidence(depth, rgb)
         
         return depth, confidence
+
+    async def estimate_depth_batch(self, views_data: dict, output_dir: str) -> dict:
+        """
+        Estimate depth for a batch of views.
+        Required by PipelineManager.
+        """
+        try:
+            depth_paths = {}
+            os.makedirs(output_dir, exist_ok=True)
+            
+            for view_name, image_path in views_data.items():
+                try:
+                    # Estimate depth
+                    depth = self.estimate_depth(image_path)
+                    
+                    # Save output
+                    base_name = f"depth_{view_name}"
+                    paths = self.save_outputs(depth, output_dir, base_name=base_name)
+                    
+                    if 'npy' in paths:
+                        depth_paths[view_name] = paths['npy']
+                        
+                except Exception as e:
+                    # Log but continue
+                    print(f"Failed to estimate depth for {view_name}: {e}")
+                    continue
+                    
+            return {
+                'success': True,
+                'depth_paths': depth_paths
+            }
+        except Exception as e:
+            return {
+                'success': False,
+                'error': str(e)
+            }
     
     def align_multi_view_depths(
         self,

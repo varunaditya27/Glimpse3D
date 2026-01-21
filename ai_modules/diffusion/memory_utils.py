@@ -142,7 +142,9 @@ def setup_memory_optimization(
             pipe.enable_xformers_memory_efficient_attention()
             print("  ✓ xFormers enabled")
         except Exception as e:
-            print(f"  ✗ xFormers not available: {e}")
+            print(f"  ℹ xFormers optional optimization not active (using standard attention): {e}")
+            # This is expected on some Windows setups or if xformers is not installed.
+            # It does not stop the pipeline.
     
     # 2. Enable VAE slicing (process in chunks)
     if config.enable_vae_slicing:
