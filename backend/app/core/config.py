@@ -8,10 +8,12 @@ Responsibilities:
 """
 
 import os
+from pathlib import Path
 
 class Settings:
     PROJECT_NAME: str = "Glimpse3D"
     API_V1_STR: str = "/api/v1"
+    PROJECT_ROOT: Path = Path(__file__).parent.parent.parent.parent
     MODEL_DIR: str = os.getenv("MODEL_DIR", "model_checkpoints")
     ASSET_DIR: str = os.getenv("ASSET_DIR", "assets")
 

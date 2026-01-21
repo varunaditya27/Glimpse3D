@@ -56,8 +56,8 @@ async def generate_3d(request: GenerateRequest, background_tasks: BackgroundTask
         output_dir = request.output_dir
         if not output_dir:
             # Use persistent assets/outputs directory
-            project_root = Path(__file__).parent.parent.parent.parent
-            output_dir = project_root / "assets" / "outputs" / job_id
+            from ..core.config import settings
+            output_dir = settings.PROJECT_ROOT / "assets" / "outputs" / job_id
             
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
@@ -66,20 +66,73 @@ async def generate_3d(request: GenerateRequest, background_tasks: BackgroundTask
         running_jobs[job_id] = {
             'status': 'starting',
             'progress': 0.0,
-            'result': None
+            'result': None,
+            'error': None,
+            'warnings': [],
+            'start_time': time.time()
         }
 
         # Add state callback to track progress
+        # We define this as an async function if we want to await websocket send,
+        # but PipelineManager callbacks are synchronous.
+        # So we need to schedule the async send on the event loop.
+        
+        from ..services.websocket_manager import manager
+        
         def update_job_status(state):
+            # Update local state
             running_jobs[job_id]['status'] = state.stage.value
             running_jobs[job_id]['progress'] = state.progress
             if state.error:
                 running_jobs[job_id]['error'] = state.error
+            if state.warnings:
+                running_jobs[job_id]['warnings'] = state.warnings
+            
+            # Prepare message
+            msg = {
+                "type": "progress_update",
+                "job_id": job_id,
+                "status": state.stage.value,
+                "progress": state.progress,
+                "message": state.message,
+                "error": state.error,
+                "warnings": state.warnings
+            }
+            
+            # If completed, include result
+            if state.stage.value == "completed":
+                 # We need to fetch the final result which is constructed in run_generation_task
+                 # Alternatively, we can let run_generation_task handle the final "completed" emit.
+                 # But state callback receives "completed" state too.
+                 # The PipelineResult holds the path, but the "state" object might just hold message.
+                 # Let's rely on run_generation_task for the FINAL detailed message with URL, 
+                 # and use this for progress.
+                 pass
+
+            # Schedule async send
+            try:
+                loop = asyncio.get_running_loop()
+                # We broadcast to the specific job_id if we treat job_id as client_id 
+                # OR we assume client subscribed with some ID. 
+                # Ideally, client connects with a session ID, and we send to that session.
+                # For simplicity here: The frontend uses a fixed ID or we just broadcast to all?
+                # Better: The frontend connects with a distinct Client ID.
+                # But we don't know WHICH client triggered this job here easily unless we pass Client-ID in request.
+                # Let's assume for this MVP we BROADCAST to all connected clients (single user mode) 
+                # OR we update the generate request to accept a client_id.
+                
+                # Using broadcast for MVP reliability in single-user scenario
+                loop.create_task(manager.broadcast(msg))
+            except RuntimeError:
+                pass # No loop
 
         pipeline_manager.add_state_callback(update_job_status)
 
         # Run generation in background
         background_tasks.add_task(run_generation_task, job_id, request.image_path, output_dir)
+        
+        # Ensure cleanup loop is running
+        ensure_cleanup_loop()
 
         return GenerateResponse(
             success=True,
@@ -90,6 +143,45 @@ async def generate_3d(request: GenerateRequest, background_tasks: BackgroundTask
     except Exception as e:
         logger.error(f"Generation request failed: {e}", exc_info=True)
         raise HTTPException(status_code=500, detail=str(e))
+
+import asyncio
+import time
+
+# Timeout Manager
+CLEANUP_task = None
+
+async def job_timeout_monitor():
+    """Periodically check for stale jobs."""
+    logger.info("Starting Job Timeout Monitor...")
+    while True:
+        try:
+            now = time.time()
+            timeout = 600  # 10 Minutes
+            
+            # List because we might modify dictionary
+            for job_id, job in list(running_jobs.items()):
+                if job['status'] in ['starting', 'processing']:
+                    start_time = job.get('start_time')
+                    if start_time and (now - start_time > timeout):
+                        logger.warning(f"Killing stale job {job_id} (Duration: {now-start_time:.1f}s)")
+                        running_jobs[job_id]['status'] = 'failed'
+                        running_jobs[job_id]['error'] = 'Job timed out (10 min limit)'
+                        # Note: We can't easily kill the asyncio task itself unless we stored the Task object
+                        # But marking it failed stops the frontend polling.
+            
+            await asyncio.sleep(60) # Check every minute
+        except Exception as e:
+            logger.error(f"Timeout monitor error: {e}")
+            await asyncio.sleep(60)
+
+def ensure_cleanup_loop():
+    global CLEANUP_task
+    try:
+        if CLEANUP_task is None or CLEANUP_task.done():
+            loop = asyncio.get_running_loop()
+            CLEANUP_task = loop.create_task(job_timeout_monitor())
+    except RuntimeError:
+        pass # No loop running
 
 @router.get("/status/{job_id}")
 async def get_generation_status(job_id: str):
@@ -103,7 +195,8 @@ async def get_generation_status(job_id: str):
         'status': job['status'],
         'progress': job['progress'],
         'result': job.get('result'),
-        'error': job.get('error')
+        'error': job.get('error'),
+        'warnings': job.get('warnings', [])
     }
 
 async def run_generation_task(job_id: str, image_path: str, output_dir: str):
@@ -118,18 +211,18 @@ async def run_generation_task(job_id: str, image_path: str, output_dir: str):
             # Convert absolute file path to HTTP URL
             # Backend serves files at /outputs/*, so we need relative path from assets/outputs/
             try:
-                project_root = Path(__file__).parent.parent.parent.parent
-                outputs_dir = project_root / "assets" / "outputs"
+                from ..core.config import settings
+                outputs_dir = settings.PROJECT_ROOT / "assets" / "outputs"
                 model_path = Path(result.final_model_path)
 
                 # Get relative path from outputs directory
                 if model_path.is_absolute():
                     try:
                         relative_path = model_path.relative_to(outputs_dir)
-                        model_url = f"/outputs/{relative_path}"
+                        model_url = f"/outputs/{relative_path}".replace("\\", "/")
                     except ValueError:
                         # If not under outputs dir, just use filename
-                        model_url = f"/outputs/{job_id}/{model_path.name}"
+                        model_url = f"/outputs/{job_id}/{model_path.name}".replace("\\", "/")
                 else:
                     model_url = f"/outputs/{model_path}"
 
@@ -145,9 +238,26 @@ async def run_generation_task(job_id: str, image_path: str, output_dir: str):
                 'result': {
                     'model_url': model_url,
                     'model_type': 'ply'
-                }
+                },
+                'warnings': result.warnings
             })
+
             logger.info(f"Generation task {job_id} completed successfully")
+            
+            # Notify WebSocket
+            try:
+                from ..services.websocket_manager import manager
+                # Use asyncio.create_task since we are in async context
+                msg = {
+                    "type": "job_completed",
+                    "job_id": job_id,
+                    "model_url": model_url,
+                    "status": "completed"
+                }
+                asyncio.create_task(manager.broadcast(msg))
+            except Exception as ws_e:
+                logger.warning(f"Failed to send WS completion: {ws_e}")
+
         else:
             running_jobs[job_id].update({
                 'status': 'failed',
@@ -155,6 +265,19 @@ async def run_generation_task(job_id: str, image_path: str, output_dir: str):
                 'error': result.error or 'Pipeline failed'
             })
             logger.error(f"Generation task {job_id} failed: {result.error}")
+            
+            # Notify WebSocket Fail
+            try:
+                from ..services.websocket_manager import manager
+                msg = {
+                    "type": "job_failed",
+                    "job_id": job_id,
+                    "error": result.error or 'Pipeline failed',
+                    "status": "failed"
+                }
+                asyncio.create_task(manager.broadcast(msg))
+            except Exception:
+                pass
 
     except Exception as e:
         error_msg = f"Generation task failed: {str(e)}"
