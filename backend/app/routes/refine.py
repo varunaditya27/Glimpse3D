@@ -79,11 +79,19 @@ async def refine_model_endpoint(request: RefineRequest):
             
         # 2. Enhance View (Diffusion)
         logger.info("Enhancing render...")
-        enhancement_result = await diffusion_service.enhance_image(
-            image_path=str(render_output),
+        # DiffusionService exposes enhance_views(); use it with a single view.
+        enhancement_results = await diffusion_service.enhance_views(
+            views={"default": str(render_output)},
             prompt=request.prompt,
             strength=request.intensity
         )
+
+        # Extract the single enhancement result to keep the rest of the logic unchanged.
+        if enhancement_results:
+            # Assume enhance_views returns a mapping from view_id to per-view result dict.
+            enhancement_result = next(iter(enhancement_results.values()))
+        else:
+            enhancement_result = {"success": False, "error": "No enhancement results returned"}
         
         if not enhancement_result['success']:
              raise HTTPException(status_code=500, detail=f"Enhancement failed: {enhancement_result.get('error')}")
