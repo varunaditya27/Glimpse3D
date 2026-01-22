@@ -12,4 +12,5 @@ transformers
 accelerate
 scipy
 plyfile
-# gsplat (install from source or specific wheel)
+trimesh
+open3d

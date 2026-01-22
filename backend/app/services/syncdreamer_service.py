@@ -1,81 +1,130 @@
-"""
-Service wrapper for SyncDreamer multi-view generation.
 
-Responsibilities:
-- Load SyncDreamer model
-- Generate consistent multi-view images from single input
-- Provide views for depth estimation and refinement
-"""
-
-import logging
+import asyncio
 import os
-import sys
-from typing import Dict, Any
+import shutil
 from pathlib import Path
+from typing import Dict, Any, List
+import logging
+import gc
 
-# Add ai_modules to path
-sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../../../")))
+from ..core.logger import get_logger
 
-from ai_modules.sync_dreamer.inference import generate_multiview, cleanup as cleanup_inference
-
-logger = logging.getLogger(__name__)
+# Try to import torch for cleanup
+try:
+    import torch
+except ImportError:
+    torch = None
 
 class SyncDreamerService:
-    def __init__(self):
-        self.logger = logger
+    """
+    Service for generating multi-view images using SyncDreamer.
+    Wraps ai_modules/sync_dreamer/inference.py
+    """
 
-    async def cleanup(self):
-        """Release GPU resources."""
-        try:
-            cleanup_inference()
-            self.logger.info("SyncDreamer resources released")
-        except Exception as e:
-            self.logger.warning(f"Failed to cleanup SyncDreamer: {e}")
+    def __init__(self):
+        self.logger = get_logger(__name__)
+        self.service_instance = None
 
     async def generate_views(self, image_path: str, output_dir: str) -> Dict[str, Any]:
         """
-        Generates novel views using SyncDreamer.
+        Generate 16 consistent views from a single input image.
         
         Args:
-            image_path: Path to input image
-            output_dir: Directory to save generated views
+            image_path: Path to the input image (RGBA).
+            output_dir: Directory to save generated views.
             
         Returns:
-            Dict with 'success', 'view_paths' (dict mapping index/name to path)
+            Dict containing:
+            - success: bool
+            - view_paths: Dict[str, str] mapping view IDs to file paths
+            - error: str (optional)
         """
         try:
-            self.logger.info(f"Generating views for {image_path} using SyncDreamer")
+            self.logger.info(f"Starting SyncDreamer generation for {image_path}")
             
-            output_path = Path(output_dir)
-            output_path.mkdir(parents=True, exist_ok=True)
+            # Ensure output directory exists
+            os.makedirs(output_dir, exist_ok=True)
             
-            # Use the synchronous generation function (SyncDreamer uses GPU heavily, blocks)
-            # In a real async server, this should maybe run in an executor, but for now strict call is fine.
-            paths_list = generate_multiview(image_path, str(output_path), elevation=30.0)
+            # Run inference in a separate thread to avoid blocking the async loop
+            # since the underlying inference is synchronous and GPU-bound
+            loop = asyncio.get_running_loop()
             
-            if not paths_list:
-                 return {
-                    'success': False,
-                    'error': 'No views generated',
-                    'view_paths': {}
-                }
-
-            # Convert list to dict for pipeline consistency (view_00, view_01...)
-            view_paths = {}
-            for i, path in enumerate(paths_list):
-                 view_name = f"view_{i:02d}"
-                 view_paths[view_name] = path
-
-            return {
-                'success': True,
-                'view_paths': view_paths
-            }
+            # Use run_in_executor to run the blocking inference code
+            result = await loop.run_in_executor(
+                None, 
+                self._run_inference_sync, 
+                image_path, 
+                output_dir
+            )
+            
+            return result
 
         except Exception as e:
-            error_msg = f"SyncDreamer generation failed: {str(e)}"
-            self.logger.error(error_msg, exc_info=True)
+            self.logger.error(f"SyncDreamer generation failed: {e}", exc_info=True)
             return {
-                'success': False,
-                'error': error_msg,
-                'view_paths': {}
+                "success": False, 
+                "error": str(e),
+                "view_paths": {}
             }
+
+    def _run_inference_sync(self, image_path: str, output_dir: str) -> Dict[str, Any]:
+        """Synchronous wrapper for the actual inference call."""
+        try:
+            # Lazy import to avoid loading heavy libraries at startup
+            from ai_modules.sync_dreamer.inference import get_service, cleanup as cleanup_module
+            
+            # Get service instance
+            self.service_instance = get_service()
+            
+            # Generate views
+            # We generate 16 views (0-15)
+            output_paths = self.service_instance.generate_and_save(
+                image_path, 
+                output_dir,
+                elevation=30.0, # Default elevation
+                save_grid=True
+            )
+            
+            # Organize paths into a dictionary
+            view_paths = {}
+            for path in output_paths:
+                filename = os.path.basename(path)
+                if "view_" in filename:
+                    # extract index from filename "view_00_..."
+                    try:
+                        idx = int(filename.split('_')[1])
+                        view_paths[f"view_{idx}"] = path
+                    except (IndexError, ValueError):
+                        continue
+            
+            self.logger.info(f"SyncDreamer generated {len(view_paths)} views")
+            
+            return {
+                "success": True,
+                "view_paths": view_paths
+            }
+            
+        except ImportError as e:
+            return {"success": False, "error": f"SyncDreamer module not found: {e}"}
+        except Exception as e:
+            return {"success": False, "error": f"Inference error: {e}"}
+
+    async def cleanup(self):
+        """Cleanup VRAM."""
+        try:
+            from ai_modules.sync_dreamer.inference import cleanup as cleanup_module
+            cleanup_module()
+            
+            if self.service_instance:
+                if hasattr(self.service_instance, 'unload_model'):
+                    self.service_instance.unload_model()
+                self.service_instance = None
+                
+            if torch and torch.cuda.is_available():
+                torch.cuda.empty_cache()
+            gc.collect()
+            
+            self.logger.info("SyncDreamer VRAM cleaned up")
+            
+        except Exception as e:
+            self.logger.warning(f"Error during SyncDreamer cleanup: {e}")

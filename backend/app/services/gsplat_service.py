@@ -32,6 +32,7 @@ class GSplatService:
     async def reconstruct_3d(self, image_path: str, output_dir: str) -> Dict[str, Any]:
         """
         Reconstruct 3D model from single image using TripoSR + gsplat.
+        Uses cached model instance for performance.
 
         Args:
             image_path: Path to input image
@@ -43,71 +44,44 @@ class GSplatService:
         try:
             output_path = Path(output_dir)
             output_path.mkdir(parents=True, exist_ok=True)
-
-            # Use the gsplat reconstruct script
-            # Path(__file__) -> services/gsplat_service.py
-            # .parent -> services
-            # .parent.parent -> app
-            # .parent.parent.parent -> backend
-            # .parent.parent.parent.parent -> ROOT (Glimpse3D)
-            script_path = Path(__file__).parent.parent.parent.parent / "ai_modules" / "gsplat" / "reconstruct.py"
             output_ply = output_path / "reconstructed.ply"
 
-            # Run reconstruction
-            cmd = [
-                "python", str(script_path),
-                image_path,
-                "--output", str(output_ply)
-            ]
+            # Import directly (paths should be set by backend/app/services/__init__.py or app main)
+            # We assume ai_modules is in sys.path. 
+            # If not, add it dynamically:
+            import sys
+            from ..core.config import settings
+            if str(settings.PROJECT_ROOT) not in sys.path:
+                sys.path.append(str(settings.PROJECT_ROOT))
 
-            self.logger.info(f"Running reconstruction: {' '.join(cmd)}")
+            from ai_modules.gsplat.reconstruct import TripoInference
 
-            # Run synchronously for now (reconstruction is fast)
-            result = subprocess.run(
-                cmd,
-                cwd=str(script_path.parent),
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minute timeout
-            )
+            self.logger.info(f"Starting in-process reconstruction for {image_path}")
 
-            if result.returncode == 0:
-                if output_ply.exists():
-                    self.logger.info(f"Reconstruction successful: {output_ply}")
-                    return {
-                        'success': True,
-                        'model_path': str(output_ply),
-                        'log': result.stdout
-                    }
-                else:
-                    # Check for alternative output names
-                    alt_files = list(output_path.glob("*.ply"))
-                    if alt_files:
-                        model_path = str(alt_files[0])
-                        self.logger.info(f"Reconstruction successful (alt): {model_path}")
-                        return {
-                            'success': True,
-                            'model_path': model_path,
-                            'log': result.stdout
-                        }
+            # Run in threadpool to avoid blocking async event loop
+            loop = asyncio.get_running_loop()
+            
+            def _run_inference():
+                inference = TripoInference()
+                return inference.run(image_path, str(output_ply))
 
-                    return {
-                        'success': False,
-                        'error': 'No PLY file generated',
-                        'log': result.stdout + result.stderr
-                    }
+            # Execute in thread pool
+            success = await loop.run_in_executor(None, _run_inference)
+
+            if success and output_ply.exists():
+                self.logger.info(f"Reconstruction successful: {output_ply}")
+                return {
+                    'success': True,
+                    'model_path': str(output_ply),
+                    'log': "In-process inference complete"
+                }
             else:
-                self.logger.error(f"Reconstruction failed: {result.stderr}")
+                self.logger.error("Reconstruction returned failure status")
                 return {
                     'success': False,
-                    'error': f'Command failed: {result.stderr}',
-                    'log': result.stdout + result.stderr
+                    'error': 'Inference failed internally',
+                    'log': "Check backend logs"
                 }
-
-        except subprocess.TimeoutExpired:
-            error_msg = "Reconstruction timed out"
-            self.logger.error(error_msg)
-            return {'success': False, 'error': error_msg}
 
         except Exception as e:
             error_msg = f"Reconstruction failed: {str(e)}"
@@ -135,13 +109,22 @@ class GSplatService:
                 output_path = str(Path(model_path).parent / "rendered_view.png")
 
             # Use the gsplat render script
-            script_path = Path(__file__).parent.parent.parent.parent / "ai_modules" / "gsplat" / "render_view.py"
+            script_path = settings.PROJECT_ROOT / "ai_modules" / "gsplat" / "render_view.py"
 
             cmd = [
                 "python", str(script_path),
                 "--ply", model_path,
                 "--output", output_path
             ]
+            
+            # Add camera parameters if present
+            if camera_params:
+                if 'elevation' in camera_params:
+                    cmd.extend(["--elevation", str(camera_params['elevation'])])
+                if 'azimuth' in camera_params:
+                    cmd.extend(["--azimuth", str(camera_params['azimuth'])])
+                if 'radius' in camera_params:
+                    cmd.extend(["--radius", str(camera_params['radius'])])
 
             self.logger.info(f"Running render: {' '.join(cmd)}")
 
@@ -196,7 +179,7 @@ class GSplatService:
             output_path.mkdir(parents=True, exist_ok=True)
 
             # Use the gsplat train script
-            script_path = Path(__file__).parent.parent.parent.parent / "ai_modules" / "gsplat" / "train.py"
+            script_path = settings.PROJECT_ROOT / "ai_modules" / "gsplat" / "train.py"
 
             # Extract image path from training data (required for loss calculation)
             image_path = training_data.get('image_path')
