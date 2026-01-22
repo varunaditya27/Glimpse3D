@@ -1,215 +1,118 @@
-"""
-Service wrapper for MiDaS / ZoeDepth.
 
-Responsibilities:
-- Load Depth estimation model
-- Generate depth maps from RGB images
-- Provide depth cues for the refinement module
-- Compute confidence for fusion quality
-"""
-
+import asyncio
 import os
-import sys
-from typing import Optional, Tuple
-import numpy as np
-from PIL import Image
+import gc
+from typing import Dict, Any, List
+import logging
+from pathlib import Path
 
-# Add ai_modules to path for imports
-sys.path.insert(0, os.path.join(os.path.dirname(__file__), '..', '..', '..', 'ai_modules'))
+from ..core.logger import get_logger
 
-from midas_depth import (
-    DepthEstimator,
-    estimate_depth,
-    estimate_depth_confidence,
-    align_depth_scales,
-    weighted_depth_fusion,
-    save_depth_visualization,
-    save_depth_grayscale,
-    save_depth_raw,
-    load_depth_raw,
-)
-
+try:
+    import torch
+except ImportError:
+    torch = None
 
 class DepthService:
     """
-    Service for depth estimation and processing.
-    
-    Provides a high-level API for the backend to:
-    - Estimate depth from images
-    - Compute confidence maps
-    - Align and fuse multi-view depths
+    Service for estimating depth maps using MiDaS.
+    Wraps ai_modules/midas_depth/run_depth.py
     """
-    
-    def __init__(
-        self,
-        model_type: str = "MiDaS_small",
-        device: Optional[str] = None
-    ):
+
+    def __init__(self):
+        self.logger = get_logger(__name__)
+        self.estimator = None
+
+    async def estimate_depth_batch(self, views_data: Dict[str, str], output_dir: str) -> Dict[str, Any]:
         """
-        Initialize the depth service.
+        Estimate depth maps for a batch of view images.
         
         Args:
-            model_type: "MiDaS_small" (fast) or "DPT_Large" (quality)
-            device: "cuda", "cpu", or None for auto-detection
+            views_data: Dict mapping view IDs to image paths.
+            output_dir: Directory to save depth maps.
+            
+        Returns:
+            Dict containing:
+            - success: bool
+            - depth_paths: Dict[str, str] mapping view IDs to depth map paths
+            - error: str (optional)
         """
-        self.model_type = model_type
-        self.device = device
-        self._estimator = None  # Lazy load
-    
-    @property
-    def estimator(self) -> DepthEstimator:
-        """Lazy-load the depth estimator."""
-        if self._estimator is None:
-            self._estimator = DepthEstimator(
-                model_type=self.model_type,
-                device=self.device
+        try:
+            self.logger.info(f"Starting depth estimation for {len(views_data)} views")
+            
+            os.makedirs(output_dir, exist_ok=True)
+            
+            loop = asyncio.get_running_loop()
+            
+            result = await loop.run_in_executor(
+                None,
+                self._run_inference_sync,
+                views_data,
+                output_dir
             )
-        return self._estimator
-    
-    def estimate_depth(self, image_path: str, normalize: bool = True) -> np.ndarray:
-        """
-        Estimate depth map from an image.
-        
-        Args:
-            image_path: Path to input RGB image
-            normalize: If True, normalize output to [0, 1]
-        
-        Returns:
-            depth: Depth map (H, W), float32
-        """
-        return self.estimator.estimate(image_path, normalize=normalize)
-    
-    def estimate_depth_with_confidence(
-        self,
-        image_path: str
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Estimate depth and confidence from an image.
-        
-        Args:
-            image_path: Path to input RGB image
-        
-        Returns:
-            depth: Depth map (H, W), float32, [0, 1]
-            confidence: Confidence map (H, W), float32, [0, 1]
-        """
-        # Estimate depth
-        depth = self.estimator.estimate(image_path, normalize=True)
-        
-        # Load RGB for texture-based confidence
-        rgb = np.array(Image.open(image_path).convert("RGB"))
-        
-        # Compute confidence
-        confidence = estimate_depth_confidence(depth, rgb)
-        
-        return depth, confidence
-    
-    def align_multi_view_depths(
-        self,
-        depth_maps: list,
-        method: str = "median"
-    ) -> list:
-        """
-        Align multiple depth maps to consistent scale.
-        
-        Args:
-            depth_maps: List of depth arrays from different views
-            method: "median" (robust) or "mean"
-        
-        Returns:
-            aligned: List of aligned depth maps
-        """
-        return align_depth_scales(depth_maps, method=method)
-    
-    def fuse_depths(
-        self,
-        depths: list,
-        confidences: list
-    ) -> Tuple[np.ndarray, np.ndarray]:
-        """
-        Fuse multiple depth maps using confidence-weighted averaging.
-        
-        Args:
-            depths: List of aligned depth maps
-            confidences: List of confidence maps
-        
-        Returns:
-            fused_depth: Combined depth map
-            fused_confidence: Combined confidence
-        """
-        return weighted_depth_fusion(depths, confidences)
-    
-    def save_outputs(
-        self,
-        depth: np.ndarray,
-        output_dir: str,
-        base_name: str = "depth",
-        save_raw: bool = True,
-        save_visual: bool = True
-    ) -> dict:
-        """
-        Save depth outputs to files.
-        
-        Args:
-            depth: Depth map to save
-            output_dir: Output directory
-            base_name: Base filename (without extension)
-            save_raw: Save .npy file
-            save_visual: Save .png visualizations
-        
-        Returns:
-            paths: Dictionary of saved file paths
-        """
-        os.makedirs(output_dir, exist_ok=True)
-        paths = {}
-        
-        if save_raw:
-            npy_path = os.path.join(output_dir, f"{base_name}.npy")
-            save_depth_raw(depth, npy_path)
-            paths["npy"] = npy_path
-        
-        if save_visual:
-            gray_path = os.path.join(output_dir, f"{base_name}_gray.png")
-            color_path = os.path.join(output_dir, f"{base_name}_color.png")
-            save_depth_grayscale(depth, gray_path)
-            save_depth_visualization(depth, color_path)
-            paths["gray"] = gray_path
-            paths["color"] = color_path
-        
-        return paths
-    
-    def load_depth(self, npy_path: str) -> np.ndarray:
-        """
-        Load depth map from .npy file.
-        
-        Args:
-            npy_path: Path to .npy file
-        
-        Returns:
-            depth: Depth map array
-        """
-        return load_depth_raw(npy_path)
+            
+            return result
 
+        except Exception as e:
+            self.logger.error(f"Depth estimation failed: {e}", exc_info=True)
+            return {
+                "success": False,
+                "error": str(e),
+                "depth_paths": {}
+            }
 
-# Singleton instance for convenience
-_depth_service: Optional[DepthService] = None
+    def _run_inference_sync(self, views_data: Dict[str, str], output_dir: str) -> Dict[str, Any]:
+        """Synchronous wrapper for depth inference."""
+        try:
+            from ai_modules.midas_depth.run_depth import get_estimator, save_depth_visualization, save_depth_raw
+            
+            # Get singular estimator instance (MiDaS_small is default/fastest)
+            # Use 'DPT_Hybrid' for better quality if GPU memory allows, but stick to small for safety
+            self.estimator = get_estimator(model_type="MiDaS_small")
+            
+            depth_paths = {}
+            
+            for view_id, image_path in views_data.items():
+                if not os.path.exists(image_path):
+                    self.logger.warning(f"Image not found: {image_path}, skipping depth.")
+                    continue
+                    
+                # Estimate depth
+                depth_map = self.estimator.estimate(image_path, normalize=True)
+                
+                # Save outputs
+                base_name = os.path.splitext(os.path.basename(image_path))[0]
+                
+                # Save visualization (PNG) and raw (NPY)
+                viz_path = os.path.join(output_dir, f"{base_name}_depth.png")
+                raw_path = os.path.join(output_dir, f"{base_name}_depth.npy")
+                
+                save_depth_visualization(depth_map, viz_path, colormap="magma")
+                save_depth_raw(depth_map, raw_path)
+                
+                # We typically track the visualization path or raw path depending on downstream needs
+                # Usually pipeline uses the image path for simple passing, or raw for precision
+                depth_paths[view_id] = raw_path # Passing RAW path for precision in next steps if needed
+                # Also handy to keep the visualization path if needed for debugging
+                
+            self.logger.info(f"Depth estimation completed for {len(depth_paths)} views")
+            
+            return {
+                "success": True,
+                "depth_paths": depth_paths
+            }
+            
+        except ImportError as e:
+            return {"success": False, "error": f"Depth module not found: {e}"}
+        except Exception as e:
+            return {"success": False, "error": f"Depth inference error: {e}"}
 
-
-def get_depth_service(
-    model_type: str = "MiDaS_small",
-    device: Optional[str] = None
-) -> DepthService:
-    """
-    Get or create a shared DepthService instance.
-    
-    Args:
-        model_type: Model type for depth estimation
-        device: Device to use
-    
-    Returns:
-        Shared DepthService instance
-    """
-    global _depth_service
-    if _depth_service is None:
-        _depth_service = DepthService(model_type=model_type, device=device)
-    return _depth_service
+    async def cleanup(self):
+        """Cleanup VRAM."""
+        # MiDaS model is small, but good practice to clear if possible
+        # The module uses a singleton `_default_estimator`, we can't easily kill it 
+        # unless we modify the module or just clear global reference if we wanted to be aggressive.
+        # For now, just torch empty cache.
+        if torch and torch.cuda.is_available():
+            torch.cuda.empty_cache()
+        gc.collect()
