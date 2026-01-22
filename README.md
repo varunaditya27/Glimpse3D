@@ -387,4 +387,6 @@ MIT License - see [LICENSE](LICENSE) for details.
 
 [Open in Colab](https://colab.research.google.com/github/varunaditya27/Glimpse3D/blob/main/notebooks/Glimpse3D_Master_Pipeline.ipynb) · [Report Bug](https://github.com/varunaditya27/Glimpse3D/issues) · [Request Feature](https://github.com/varunaditya27/Glimpse3D/issues)
 
+[Open in Colab](https://colab.research.google.com/github/varunaditya27/Glimpse3D/blob/main/notebooks/Glimpse3D_Master_Pipeline.ipynb) · [Report Bug](https://github.com/varunaditya27/Glimpse3D/issues) · [Request Feature](https://github.com/varunaditya27/Glimpse3D/issues)
+
 </div>
