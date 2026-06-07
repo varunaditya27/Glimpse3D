@@ -46,3 +46,26 @@ outputs/
 logs/
 *.log
 training_log*.txt
+
+# Build / runtime outputs
+assets/outputs/
+assets/uploads/
+ai_modules/**/output/
+*.ply
+*.npy
+*.splat
+# Backups & debug scratch
+*.bak
+*.dev*.bak
+debug_*.py
+debug_*.png
+backend.log
+filtered_log.txt
+install_triposr_log.txt
+# Local DB
+*.sqlite
+*.sqlite3
+*.db
+# Env
+backend/.env
+frontend/.env*.local
