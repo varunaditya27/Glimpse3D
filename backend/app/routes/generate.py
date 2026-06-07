@@ -17,6 +17,7 @@ from typing import Optional
 
 from ..core.config import settings
 from ..core.logger import get_logger
+from ..core.repository import get_job_repo
 from ..services.pipeline_manager import PipelineManager
 
 logger = get_logger(__name__)
@@ -24,6 +25,9 @@ router = APIRouter(prefix="/generate", tags=["Generate"])
 
 # Global pipeline manager instance
 pipeline_manager = PipelineManager()
+
+# Persistent job repository (backend chosen via settings.PERSISTENCE_BACKEND)
+repo = get_job_repo()
 
 class GenerateRequest(BaseModel):
     image_path: str
@@ -35,9 +39,6 @@ class GenerateResponse(BaseModel):
     model_url: Optional[str] = None
     error: Optional[str] = None
     job_id: Optional[str] = None
-
-# Store running jobs (in production, use Redis/database)
-running_jobs = {}
 
 @router.post("/")
 async def generate_3d(request: GenerateRequest, background_tasks: BackgroundTasks):
@@ -64,14 +65,8 @@ async def generate_3d(request: GenerateRequest, background_tasks: BackgroundTask
         output_path.mkdir(parents=True, exist_ok=True)
 
         # Store job status
-        running_jobs[job_id] = {
-            'status': 'starting',
-            'progress': 0.0,
-            'result': None,
-            'error': None,
-            'warnings': [],
-            'start_time': time.time()
-        }
+        repo.create(job_id, request.image_path, output_dir)
+        repo.update(job_id, status='starting', progress=0.0)
 
         # Add state callback to track progress
         # We define this as an async function if we want to await websocket send,
@@ -81,14 +76,16 @@ async def generate_3d(request: GenerateRequest, background_tasks: BackgroundTask
         from ..services.websocket_manager import manager
         
         def update_job_status(state):
-            # Update local state
-            running_jobs[job_id]['status'] = state.stage.value
-            running_jobs[job_id]['progress'] = state.progress
-            if state.error:
-                running_jobs[job_id]['error'] = state.error
-            if state.warnings:
-                running_jobs[job_id]['warnings'] = state.warnings
-            
+            # Persist state
+            repo.update(
+                job_id,
+                status=state.stage.value,
+                progress=state.progress,
+                message=state.message,
+                error=state.error,
+                warnings=state.warnings,
+            )
+
             # Prepare message
             msg = {
                 "type": "progress_update",
@@ -146,7 +143,6 @@ async def generate_3d(request: GenerateRequest, background_tasks: BackgroundTask
         raise HTTPException(status_code=500, detail=str(e))
 
 import asyncio
-import time
 
 # Timeout Manager
 CLEANUP_task = None
@@ -156,20 +152,13 @@ async def job_timeout_monitor():
     logger.info("Starting Job Timeout Monitor...")
     while True:
         try:
-            now = time.time()
-            timeout = settings.PIPELINE_TIMEOUT
-            
-            # List because we might modify dictionary
-            for job_id, job in list(running_jobs.items()):
-                if job['status'] in ['starting', 'processing']:
-                    start_time = job.get('start_time')
-                    if start_time and (now - start_time > timeout):
-                        logger.warning(f"Killing stale job {job_id} (Duration: {now-start_time:.1f}s)")
-                        running_jobs[job_id]['status'] = 'failed'
-                        running_jobs[job_id]['error'] = 'Job timed out (10 min limit)'
-                        # Note: We can't easily kill the asyncio task itself unless we stored the Task object
-                        # But marking it failed stops the frontend polling.
-            
+            # Mark jobs still in starting/processing past the timeout as failed.
+            # Note: We can't easily kill the asyncio task itself unless we stored the Task object
+            # But marking it failed stops the frontend polling.
+            reaped = repo.reap_stale(settings.PIPELINE_TIMEOUT)
+            if reaped:
+                logger.warning(f"Killed {reaped} stale job(s) (timeout: {settings.PIPELINE_TIMEOUT}s)")
+
             await asyncio.sleep(60) # Check every minute
         except Exception as e:
             logger.error(f"Timeout monitor error: {e}")
@@ -187,12 +176,12 @@ def ensure_cleanup_loop():
 @router.get("/status/{job_id}")
 async def get_generation_status(job_id: str):
     """Get the status of a generation job."""
-    if job_id not in running_jobs:
+    job = repo.get(job_id)
+    if job is None:
         raise HTTPException(status_code=404, detail="Job not found")
 
-    job = running_jobs[job_id]
     return {
-        'job_id': job_id,
+        'job_id': job['job_id'],
         'status': job['status'],
         'progress': job['progress'],
         'result': job.get('result'),
@@ -233,14 +222,10 @@ async def run_generation_task(job_id: str, image_path: str, output_dir: str):
                 logger.error(f"Failed to construct model URL: {e}")
                 model_url = f"/outputs/{job_id}/model.ply"  # Fallback
 
-            running_jobs[job_id].update({
-                'status': 'completed',
-                'progress': 1.0,
-                'result': {
-                    'model_url': model_url,
-                    'model_type': 'ply'
-                },
-                'warnings': result.warnings
+            repo.update(job_id, warnings=result.warnings)
+            repo.mark_completed(job_id, {
+                'model_url': model_url,
+                'model_type': 'ply'
             })
 
             logger.info(f"Generation task {job_id} completed successfully")
@@ -260,11 +245,7 @@ async def run_generation_task(job_id: str, image_path: str, output_dir: str):
                 logger.warning(f"Failed to send WS completion: {ws_e}")
 
         else:
-            running_jobs[job_id].update({
-                'status': 'failed',
-                'progress': 1.0,
-                'error': result.error or 'Pipeline failed'
-            })
+            repo.mark_failed(job_id, result.error or 'Pipeline failed', warnings=result.warnings)
             logger.error(f"Generation task {job_id} failed: {result.error}")
             
             # Notify WebSocket Fail
@@ -283,11 +264,7 @@ async def run_generation_task(job_id: str, image_path: str, output_dir: str):
     except Exception as e:
         error_msg = f"Generation task failed: {str(e)}"
         logger.error(error_msg, exc_info=True)
-        running_jobs[job_id].update({
-            'status': 'failed',
-            'progress': 1.0,
-            'error': error_msg
-        })
+        repo.mark_failed(job_id, error_msg)
 
 # Legacy endpoint for backward compatibility
 @router.post("/{upload_id}")

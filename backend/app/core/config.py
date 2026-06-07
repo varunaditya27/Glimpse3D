@@ -21,4 +21,11 @@ class Settings:
     GSPLAT_TRAIN_TIMEOUT: int = int(os.getenv("GSPLAT_TRAIN_TIMEOUT", "1800"))
     RENDER_TIMEOUT: int = int(os.getenv("RENDER_TIMEOUT", "60"))
 
+    # Job persistence
+    PERSISTENCE_BACKEND: str = os.getenv("PERSISTENCE_BACKEND", "sqlite")
+    DATABASE_URL: str = os.getenv("DATABASE_URL", "sqlite:///./glimpse3d.db")
+    SUPABASE_URL: str = os.getenv("SUPABASE_URL", "")
+    SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
+    SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")
+
 settings = Settings()

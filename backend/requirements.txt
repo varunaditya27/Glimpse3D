@@ -14,3 +14,5 @@ scipy
 plyfile
 trimesh
 open3d
+SQLAlchemy>=2.0
+# supabase>=2.0  (only if PERSISTENCE_BACKEND=supabase)
