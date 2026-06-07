@@ -24,6 +24,7 @@ except ImportError:
 
 from ..core.logger import get_logger
 from ..core.utils import retry_gpu_operation
+from ..core.config import settings
 
 logger = get_logger(__name__)
 
@@ -130,64 +131,58 @@ class PipelineManager:
             all_warnings.extend(w)
             intermediate_files['coarse_model'] = coarse_model_path
 
-            # Detect Mock Fallback
-            if "mock" in str(coarse_model_path).lower():
-                 self.logger.warning("Mock model detected. Skipping advanced stages to prevent crash.")
-                 all_warnings.append("Advanced AI skipped due to basic reconstruction failure.")
-                 refined_model_path = coarse_model_path
-            else:
-                # Stage 2: Multi-view Generation
-                self._update_state(PipelineStage.MULTI_VIEW_GENERATION, 0.3,
-                                 "Generating additional views...", warnings=all_warnings)
-                
-                try:
-                    views_data, w = await self._run_multi_view_generation(image_path, output_path)
-                    all_warnings.extend(w)
-                    intermediate_files.update(views_data)
-                except Exception as e:
-                    self.logger.warning(f"Multi-view generation failed completely: {e}")
-                    all_warnings.append("Multi-view generation failed. Using single-view.")
-                    views_data = {}
+            # Stage 2: Multi-view Generation
+            self._update_state(PipelineStage.MULTI_VIEW_GENERATION, 0.3,
+                             "Generating additional views...", warnings=all_warnings)
 
-                # Stage 3: Depth Estimation
-                self._update_state(PipelineStage.DEPTH_ESTIMATION, 0.4,
-                                 "Estimating depth maps...", warnings=all_warnings)
-                
-                try:
-                    depth_data, w = await self._run_depth_estimation(views_data, output_path)
-                    all_warnings.extend(w)
-                    intermediate_files.update(depth_data)
-                except Exception as e:
-                    self.logger.warning(f"Depth estimation failed completely: {e}")
-                    all_warnings.append("Depth estimation failed.")
-                    depth_data = {}
+            try:
+                views_data, w = await self._run_multi_view_generation(image_path, output_path)
+                all_warnings.extend(w)
+                intermediate_files.update(views_data)
+            except Exception as e:
+                self.logger.warning(f"Multi-view generation failed completely: {e}")
+                all_warnings.append("Multi-view generation failed. Using single-view.")
+                views_data = {}
 
-                # Stage 4: Diffusion Enhancement
-                self._update_state(PipelineStage.DIFFUSION_ENHANCEMENT, 0.6,
-                                 "Enhancing views with diffusion...", warnings=all_warnings)
+            # Stage 3: Depth Estimation
+            self._update_state(PipelineStage.DEPTH_ESTIMATION, 0.4,
+                             "Estimating depth maps...", warnings=all_warnings)
 
-                try:
-                    enhanced_views, w = await self._run_diffusion_enhancement(views_data, depth_data, output_path)
-                    all_warnings.extend(w)
-                    intermediate_files.update(enhanced_views)
-                except Exception as e:
-                    self.logger.warning(f"Diffusion enhancement failed completely: {e}")
-                    all_warnings.append("AI enhancement failed. Using raw generation.")
-                    enhanced_views = views_data
+            try:
+                depth_data, w = await self._run_depth_estimation(views_data, output_path)
+                all_warnings.extend(w)
+                intermediate_files.update(depth_data)
+            except Exception as e:
+                self.logger.warning(f"Depth estimation failed completely: {e}")
+                all_warnings.append("Depth estimation failed.")
+                depth_data = {}
 
-                # Stage 5: Refinement
-                self._update_state(PipelineStage.REFINEMENT, 0.8,
-                                 "Refining 3D model...", warnings=all_warnings)
+            # Stage 4: Diffusion Enhancement
+            self._update_state(PipelineStage.DIFFUSION_ENHANCEMENT, 0.6,
+                             "Enhancing views with diffusion...", warnings=all_warnings)
 
-                try:
-                    refined_model_path, w = await self._run_refinement(
-                        coarse_model_path, enhanced_views, views_data, depth_data, output_path, image_path
-                    )
-                    all_warnings.extend(w)
-                except Exception as e:
-                    self.logger.warning(f"Refinement failed completely: {e}")
-                    all_warnings.append("Refinement failed. Using coarse model.")
-                    refined_model_path = coarse_model_path
+            try:
+                enhanced_views, w = await self._run_diffusion_enhancement(views_data, depth_data, output_path)
+                all_warnings.extend(w)
+                intermediate_files.update(enhanced_views)
+            except Exception as e:
+                self.logger.warning(f"Diffusion enhancement failed completely: {e}")
+                all_warnings.append("AI enhancement failed. Using raw generation.")
+                enhanced_views = views_data
+
+            # Stage 5: Refinement
+            self._update_state(PipelineStage.REFINEMENT, 0.8,
+                             "Refining 3D model...", warnings=all_warnings)
+
+            try:
+                refined_model_path, w = await self._run_refinement(
+                    coarse_model_path, enhanced_views, views_data, depth_data, output_path, image_path
+                )
+                all_warnings.extend(w)
+            except Exception as e:
+                self.logger.warning(f"Refinement failed completely: {e}")
+                all_warnings.append("Refinement failed. Using coarse model.")
+                refined_model_path = coarse_model_path
 
             intermediate_files['refined_model'] = refined_model_path
 
@@ -216,12 +211,20 @@ class PipelineManager:
 
             self._update_state(PipelineStage.FAILED, 0.0, error_msg, error=error_msg)
 
+            # DEMO_MODE may attach a clearly-labeled placeholder model so the demo
+            # can render something. It is NEVER reported as success.
+            demo_placeholder = getattr(e, 'demo_placeholder_path', None)
+            if demo_placeholder is not None:
+                intermediate_files['demo_placeholder'] = demo_placeholder
+                all_warnings.append("DEMO placeholder - not a real reconstruction")
+
             return PipelineResult(
                 success=False,
                 final_model_path=None,
                 intermediate_files=intermediate_files,
                 metrics=metrics,
-                error=error_msg
+                error=error_msg,
+                warnings=all_warnings
             )
 
     @retry_gpu_operation(max_retries=2)
@@ -241,16 +244,16 @@ class PipelineManager:
             return result['model_path'], warnings
 
         except Exception as e:
-            # Fallback to mock implementation
-            msg = f"GSplatService failed ({str(e)}), using mock reconstruction (valid PLY fallback)"
-            self.logger.warning(msg)
-            warnings.append(msg)
-            
-            mock_path = output_path / "coarse_model.ply"
-            # Create a simple valid PLY file
-            with open(mock_path, 'w') as f:
-                f.write("""ply
+            self.logger.error(f"Coarse reconstruction failed: {e}", exc_info=True)
+
+            if settings.DEMO_MODE:
+                # DEMO ONLY: write a clearly-labeled placeholder so the demo can
+                # render *something*, but the run must NOT be reported as success.
+                placeholder_path = output_path / "coarse_model_DEMO_PLACEHOLDER.ply"
+                with open(placeholder_path, 'w') as f:
+                    f.write("""ply
 format ascii 1.0
+comment DEMO placeholder - NOT a real reconstruction
 element vertex 4
 property float x
 property float y
@@ -264,7 +267,13 @@ end_header
 0 1 0 255 0 0
 0 0 1 255 0 0
 """)
-            return str(mock_path), warnings
+                exc = RuntimeError(f"Coarse reconstruction failed: {e}")
+                # Signal the demo placeholder to run_pipeline so it can surface it
+                # with success=False instead of silently faking a successful result.
+                exc.demo_placeholder_path = str(placeholder_path)
+                raise exc
+
+            raise RuntimeError(f"Coarse reconstruction failed: {e}")
 
     @retry_gpu_operation(max_retries=1)
     async def _run_multi_view_generation(self, image_path: str, output_path: Path) -> Tuple[Dict[str, str], List[str]]:
@@ -309,87 +318,10 @@ end_header
              self.logger.warning(msg)
              warnings.append(msg)
              return {}, warnings
-        except Exception as e:
-            # This catch block is INSIDE the decorated function?
-            # No, if we catch here, the decorator won't see the exception to retry!
-            # We must let OOM propagate for retry to work.
-            # But we want graceful degradation ULTIMATELY.
-            # So: 
-            # 1. We should NOT catch generic Exception inside the decorated method if we want retry.
-            # 2. But we need to handle "Final Failure" to degrade gracefully.
-            # 
-            # Refactor: 
-            # The Decoration ensures retries. 
-            # If after retries it still fails, it raises Exception.
-            # We need to wrap the CALL to this method in run_pipeline with try/catch for degradation?
-            # OR we put the try/catch for degradation in `run_pipeline` which calls this.
-            # 
-            # Looking at `run_pipeline` (lines 142 etc), it calls `self._run_multi_view_generation`.
-            # `run_pipeline` doesn't have specific try/catch around that call, it has one BIG try/catch.
-            # So if this raises, the whole pipeline fails.
-            # WE WANT DEGRADATION.
-            # 
-            # Solution: We should handle the Final Exception inside this method but AFTER retries? 
-            # The decorator doesn't allow "on final failure".
-            # 
-            # Correct approach:
-            # 1. Decorate a private inner method `_do_run_multi_view` that raises.
-            # 2. `_run_multi_view` calls `_do_run_multi_view` in a try/catch block to handle degradation.
-            # 
-            # OR simpler:
-            # Just let the decorator retry. If it fails, `run_pipeline` catches the exception.
-            # But `run_pipeline` aborts the whole pipeline.
-            # 
-            # I will refactor `run_pipeline` to wrap individual stages in try/catch for degradation?
-            # That's a good pattern.
-            # 
-            # BUT, to minimize edits, I can implement the retry logic manually inside the methods or 
-            # create a helper that returns empty dict on final failure.
-            # 
-            # Let's stick to adding @retry_gpu_operation.
-            # AND WE MUST REMOVE the internal broad try/catch that suppresses errors, 
-            # OR re-raise them if they are OOM so decorator sees them?
-            # 
-            # Waiting... The current code HAS broad try/catch in `_run_multi_view_generation`.
-            # If I add @retry, the decorator will wrap the whole function.
-            # The function executes. If it catches the exception and returns {}, the decorator thinks it SUCCEEDED.
-            # So retries won't happen.
-            # 
-            # I need to remove the broad try/catch from `_run_multi_view_generation` 
-            # AND handle the "Final Failure" in `run_pipeline`.
-            # 
-            # Change of plan for this file:
-            # 1. Modify `run_pipeline` to wrap the call to `_run_multi_view_generation` in a try/except.
-            # 2. Modify `_run_multi_view_generation` to RAISE errors instead of swallowing them.
-            # 3. Decorate `_run_multi_view_generation` with @retry.
-            
-            raise e 
-
-    # Wait, simple edit: 
-    # I will keep the method signature as is, but remove the internal generic try/except 
-    # allowing the decorator to catch and retry. 
-    # THEN, the decorator will raise the final exception.
-    # CONSTANT: `run_pipeline` needs to be updated to catch that final exception so it degrades instead of failing.
-    
-    # Let's start by modifying the methods to RAISE by default (after removing internal try/catch or re-raising) 
-    # so the decorator works.
-    # AND I will create a `_run_multi_view_generation_safe` wrapper or just update `run_pipeline`.
-    
-    # Updating `run_pipeline` is cleaner but touches lines 102-205.
-    # Updating internal methods is lines 206-389.
-    
-    pass 
-    
-    # For now, let's just apply the decorator and rely on the existing try/catch logic 
-    # BUT modify the logic to Re-Raise if it's OOM?
-    # No, that's messy.
-    
-    # Let's do this:
-    # 1. Decorate the methods.
-    # 2. Remove the `except Exception` blocks inside the methods (except for ImportErrors).
-    # 3. Update `run_pipeline` to handle the failure of these optional stages.
-    
-    # Since I'm using `replace_file_content`, I can replace each method entirely.
+        except Exception:
+            # Let the exception propagate so @retry_gpu_operation can retry, and so
+            # run_pipeline can degrade gracefully if retries are exhausted.
+            raise
 
     @retry_gpu_operation(max_retries=2)
     async def _run_depth_estimation(self, views_data: Dict[str, str], output_path: Path) -> Tuple[Dict[str, str], List[str]]:

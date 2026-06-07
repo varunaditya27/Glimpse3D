@@ -15,6 +15,7 @@ from fastapi import APIRouter, HTTPException, BackgroundTasks
 from pydantic import BaseModel
 from typing import Optional
 
+from ..core.config import settings
 from ..core.logger import get_logger
 from ..services.pipeline_manager import PipelineManager
 
@@ -156,7 +157,7 @@ async def job_timeout_monitor():
     while True:
         try:
             now = time.time()
-            timeout = 600  # 10 Minutes
+            timeout = settings.PIPELINE_TIMEOUT
             
             # List because we might modify dictionary
             for job_id, job in list(running_jobs.items()):

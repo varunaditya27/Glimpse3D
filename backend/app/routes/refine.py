@@ -77,32 +77,32 @@ async def refine_model_endpoint(request: RefineRequest):
         if not render_result['success']:
             raise HTTPException(status_code=500, detail=f"Rendering failed: {render_result.get('error')}")
             
-        # 2. Enhance View (Diffusion)
-        logger.info("Enhancing render...")
-        # DiffusionService exposes enhance_views(); use it with a single view.
-        enhancement_results = await diffusion_service.enhance_views(
-            views={"default": str(render_output)},
-            prompt=request.prompt,
-            strength=request.intensity
-        )
-
-        # Extract the single enhancement result to keep the rest of the logic unchanged.
-        if enhancement_results:
-            # Assume enhance_views returns a mapping from view_id to per-view result dict.
-            enhancement_result = next(iter(enhancement_results.values()))
-        else:
-            enhancement_result = {"success": False, "error": "No enhancement results returned"}
-        
-        if not enhancement_result['success']:
-             raise HTTPException(status_code=500, detail=f"Enhancement failed: {enhancement_result.get('error')}")
-             
-        enhanced_image_path = enhancement_result['enhanced_path']
-        
-        # 3. Optimize Splats (Back-Projection)
-        logger.info("Optimizing splats...")
+        # Output dir for both the enhanced image and the refined splats.
         refine_output_dir = model_dir / "refined"
         refine_output_dir.mkdir(exist_ok=True)
-        
+
+        # 2. Enhance View (Diffusion)
+        logger.info("Enhancing render...")
+        # DiffusionService.enhance_views() returns a result dict:
+        #   {"success": bool, "enhanced_paths": {view_id: path}, "error": str?}
+        enhancement_result = await diffusion_service.enhance_views(
+            views_data={"default": str(render_output)},
+            depth_data={},
+            output_dir=str(refine_output_dir),
+            prompt=request.prompt,
+            strength=request.intensity,
+        )
+
+        if not enhancement_result.get('success'):
+            raise HTTPException(status_code=500, detail=f"Enhancement failed: {enhancement_result.get('error')}")
+
+        enhanced_image_path = enhancement_result.get('enhanced_paths', {}).get('default')
+        if not enhanced_image_path:
+            raise HTTPException(status_code=500, detail="Enhancement produced no output image")
+
+        # 3. Optimize Splats (Back-Projection)
+        logger.info("Optimizing splats...")
+
         training_data = {
             "image_path": enhanced_image_path,
             "iterations": request.iterations,

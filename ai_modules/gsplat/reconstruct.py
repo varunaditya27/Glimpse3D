@@ -125,24 +125,18 @@ class TripoInference:
         model = self.load_model()
         logger.info("Running inference...")
 
-        if model is not None:
-            try:
-                device = next(model.parameters()).device
-                with torch.no_grad():
-                    scene_codes = model([processed_image], device=device)
-                    meshes = model.extract_mesh(scene_codes, True, resolution=256)
-                    return meshes[0]
-            except Exception as e:
-                logger.error(f"Inference failed (fallback): {e}")
+        if model is None:
+            raise RuntimeError("TripoSR model unavailable: inference cannot proceed.")
 
-        # Fallback logic
-        logger.warning("Using Dummy Mesh (Sphere/Cube) for testing.")
-        verts = []
-        for x in [-0.5, 0.5]:
-            for y in [-0.5, 0.5]:
-                for z in [-0.5, 0.5]:
-                    verts.append([x, y, z])
-        return SimpleMesh(np.array(verts, dtype=np.float32), np.array([[0, 1, 2]], dtype=np.int32))
+        try:
+            device = next(model.parameters()).device
+            with torch.no_grad():
+                scene_codes = model([processed_image], device=device)
+                meshes = model.extract_mesh(scene_codes, True, resolution=256)
+                return meshes[0]
+        except Exception as e:
+            logger.error(f"Inference failed: {e}")
+            raise RuntimeError(f"Inference failed: {e}")
 
     def export_ply(self, mesh, output_path: str):
         """Sample points and export to PLY."""
@@ -152,8 +146,11 @@ class TripoInference:
             points = mesh.sample(100000)
         else:
             points = mesh.vertices
-            if len(points) < 100:
-                points = np.random.uniform(-0.5, 0.5, (1000, 3)).astype(np.float32)
+
+        if len(points) < 100:
+            raise RuntimeError(
+                f"Reconstruction produced too few points ({len(points)}); refusing to fabricate geometry."
+            )
 
         num_points = len(points)
         

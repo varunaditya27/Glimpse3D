@@ -11,6 +11,8 @@ Responsibilities:
 - Health check endpoints
 """
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -72,4 +74,10 @@ app.include_router(upload.router)
 app.include_router(generate.router)
 app.include_router(refine.router)
 app.include_router(export.router)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
 
