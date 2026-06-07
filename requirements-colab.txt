@@ -86,6 +86,13 @@ matplotlib>=3.7.0
 easydict>=1.10
 
 # =============================================================================
+# WEIGHT DOWNLOADER (scripts/download_weights.py)
+# =============================================================================
+# gdown handles Google Drive large-file confirm tokens (SyncDreamer ckpt).
+# huggingface_hub (pinned above) fetches CLIP ViT-L-14.pt + prewarm repos.
+gdown>=5.1.0
+
+# =============================================================================
 # OPTIONAL: Testing & Development
 # =============================================================================
 # pytest>=7.4.0
