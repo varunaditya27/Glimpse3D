@@ -17,6 +17,10 @@ class Settings:
     MODEL_DIR: str = os.getenv("MODEL_DIR", "model_checkpoints")
     ASSET_DIR: str = os.getenv("ASSET_DIR", "assets")
     DEMO_MODE: bool = os.getenv("GLIMPSE3D_DEMO_MODE", "").strip().lower() in ("1", "true", "yes")
+    # MVCRM (Multi-View Consistency Refinement Module) back-projection refinement.
+    # When enabled, _run_refinement attempts MVCRM and falls back to the existing
+    # gsplat optimize/coarse result on any failure.
+    MVCRM_ENABLED: bool = os.getenv("MVCRM_ENABLED", "true").strip().lower() in ("1", "true", "yes")
     PIPELINE_TIMEOUT: int = int(os.getenv("PIPELINE_TIMEOUT", "2700"))
     GSPLAT_TRAIN_TIMEOUT: int = int(os.getenv("GSPLAT_TRAIN_TIMEOUT", "1800"))
     RENDER_TIMEOUT: int = int(os.getenv("RENDER_TIMEOUT", "60"))

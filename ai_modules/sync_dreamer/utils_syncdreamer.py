@@ -3,7 +3,9 @@ Utility functions for SyncDreamer integration with Glimpse3D
 """
 
 import os
+import math
 import numpy as np
+import torch
 from PIL import Image
 from typing import List, Tuple, Optional
 from pathlib import Path
@@ -187,8 +189,116 @@ def get_camera_matrices(
         mat[:3, 3] = pos
         
         matrices.append(mat)
-    
+
     return matrices
+
+
+def syncdreamer_cameras(
+    image_size: int = 252,
+    radius: float = 1.5,
+    fov_deg: float = 51.98
+) -> List["CameraParams"]:
+    """
+    Build the 16 SyncDreamer view cameras for Glimpse3D back-projection.
+
+    Produces one CameraParams per SyncDreamer output view, using the fixed
+    elevation/azimuth schedule defined on SyncDreamerService (8 azimuths at
+    +30 elevation followed by 8 azimuths at -20 elevation).
+
+    Each camera is positioned at spherical (elevation, azimuth, radius) and
+    looks at the origin. Extrinsics are 4x4 world->camera matrices in the
+    OpenCV convention (+X right, +Y down, +Z forward into the scene).
+    Intrinsics are a 3x3 pinhole matrix derived from fov_deg and image_size.
+
+    Args:
+        image_size: Square render resolution in px. Defaults to 252 (=18*14) so
+            it stays divisible by the DINOv2 patch size (14) used by the MVCRM
+            feature-consistency check; SyncDreamer's native 256px views are
+            resized to this internally.
+        radius: Distance from each camera to the origin
+        fov_deg: Field of view in degrees used for the pinhole intrinsics
+
+    Returns:
+        List of exactly 16 CameraParams objects (one per SyncDreamer view)
+    """
+    # Imported here to avoid a hard import dependency at module load time.
+    # The refine_module package __init__ pulls in heavy optional deps (scipy,
+    # etc.); if that fails in a lightweight environment, load the back_projector
+    # submodule directly so CameraParams stays importable.
+    try:
+        from ai_modules.refine_module.back_projector import CameraParams
+    except Exception:
+        import importlib.util
+        bp_path = Path(__file__).resolve().parents[1] / "refine_module" / "back_projector.py"
+        spec = importlib.util.spec_from_file_location(
+            "ai_modules.refine_module.back_projector", bp_path
+        )
+        bp_module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(bp_module)
+        CameraParams = bp_module.CameraParams
+
+    # SyncDreamerService is the source of truth for the view schedule. Importing
+    # it pulls in the diffusion stack, which may be unavailable in lightweight
+    # (e.g. CPU-only) environments; fall back to the locally-mirrored constants,
+    # which are kept identical to the class attributes.
+    try:
+        from ai_modules.sync_dreamer.inference import SyncDreamerService
+        elevations = SyncDreamerService.ELEVATIONS
+        azimuths = SyncDreamerService.AZIMUTHS
+    except Exception:
+        elevations = SYNCDREAMER_CAMERAS["elevations"]
+        azimuths = SYNCDREAMER_CAMERAS["azimuths"]
+
+    # Pinhole intrinsics from field of view (shared by all 16 views).
+    fov_rad = math.radians(fov_deg)
+    focal = 0.5 * image_size / math.tan(0.5 * fov_rad)
+    center = image_size / 2.0
+    intrinsics = torch.tensor([
+        [focal, 0.0, center],
+        [0.0, focal, center],
+        [0.0, 0.0, 1.0],
+    ], dtype=torch.float32)
+
+    cameras: List[CameraParams] = []
+
+    for elev, azim in zip(elevations, azimuths):
+        elev_rad = math.radians(float(elev))
+        azim_rad = math.radians(float(azim))
+
+        # Camera center in world space (spherical -> cartesian, +Y up world).
+        cam_center = torch.tensor([
+            radius * math.cos(elev_rad) * math.sin(azim_rad),
+            radius * math.sin(elev_rad),
+            radius * math.cos(elev_rad) * math.cos(azim_rad),
+        ], dtype=torch.float32)
+
+        # OpenCV look-at: +Z (forward) points from the camera toward the origin.
+        forward = -cam_center / torch.norm(cam_center)
+
+        # Right = up_world x forward; in OpenCV +Y is down, so the camera up is
+        # the negative of the world up vector used to seed the basis.
+        world_up = torch.tensor([0.0, 1.0, 0.0], dtype=torch.float32)
+        right = torch.cross(world_up, forward, dim=0)
+        right = right / torch.norm(right)
+        down = torch.cross(forward, right, dim=0)  # +Y axis (down) in OpenCV
+
+        # Rotation rows are the camera-space axes expressed in world coords:
+        # R maps world directions into camera space (world->camera).
+        R = torch.stack([right, down, forward], dim=0)  # (3, 3)
+        t = -torch.matmul(R, cam_center)  # (3,)
+
+        extrinsics = torch.eye(4, dtype=torch.float32)
+        extrinsics[:3, :3] = R
+        extrinsics[:3, 3] = t
+
+        cameras.append(CameraParams(
+            intrinsics=intrinsics.clone(),
+            extrinsics=extrinsics,
+            width=image_size,
+            height=image_size,
+        ))
+
+    return cameras
 
 
 def views_to_video(

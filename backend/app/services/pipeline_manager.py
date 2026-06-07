@@ -405,7 +405,46 @@ end_header
         if not result['success']:
              raise RuntimeError(f"Refinement failed: {result.get('error')}")
 
-        return result['model_path'], warnings
+        refined_model_path = result['model_path']
+
+        # ★ MVCRM back-projection refinement (novel contribution).
+        # Runs on top of the gsplat-optimized model. On ANY failure we log a
+        # warning and fall back to the optimize result; the pipeline never crashes
+        # because of MVCRM.
+        if settings.MVCRM_ENABLED:
+            try:
+                from .backprojection import BackProjectionService
+
+                bp_service = BackProjectionService()
+                mvcrm_result = await bp_service.refine_model(
+                    coarse_model_path=refined_model_path,
+                    enhanced_views=enhanced_views or {},
+                    depth_maps=depth_data or {},
+                    output_dir=str(output_path),
+                )
+
+                if mvcrm_result.get('success') and mvcrm_result.get('refined_model_path'):
+                    refined_model_path = mvcrm_result['refined_model_path']
+                    self.logger.info(
+                        f"MVCRM refinement succeeded: {refined_model_path}"
+                    )
+                else:
+                    msg = (
+                        "MVCRM refinement did not succeed: "
+                        f"{mvcrm_result.get('error', 'unknown error')}. "
+                        "Falling back to gsplat optimize result."
+                    )
+                    self.logger.warning(msg)
+                    warnings.append(msg)
+            except Exception as e:
+                msg = (
+                    f"MVCRM refinement failed: {e}. "
+                    "Falling back to gsplat optimize result."
+                )
+                self.logger.warning(msg)
+                warnings.append(msg)
+
+        return refined_model_path, warnings
 
     async def _run_export(self, model_path: str, output_path: Path) -> str:
         """Export final model in requested formats."""
