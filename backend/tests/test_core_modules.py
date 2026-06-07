@@ -1,11 +1,21 @@
 import pytest
-import torch
 import sys
 import os
-import numpy as np
 
 # ensure root is in path
 sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), '../../')))
+
+# This whole module is heavy: it needs torch + the CUDA-only gsplat rasterizer.
+# Marking it heavy keeps it out of the light suite. The heavy imports are also
+# guarded so that *collection* of the light suite never fails on a host without
+# torch/gsplat (a bare `import torch` at module top would error at collection
+# time, before the marker can deselect the tests).
+pytestmark = pytest.mark.heavy
+
+torch = pytest.importorskip("torch")
+np = pytest.importorskip("numpy")
+# ai_modules.gsplat.__init__ imports the CUDA-only `gsplat` rasterizer.
+pytest.importorskip("gsplat")
 
 from ai_modules.wrapper_syncdreamer import SyncDreamerWrapper
 from ai_modules.wrapper_midas import MidasWrapper

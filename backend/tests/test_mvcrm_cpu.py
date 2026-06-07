@@ -73,6 +73,7 @@ def _make_synthetic_model(num_splats: int = 50) -> GaussianModel:
     return model
 
 
+@pytest.mark.heavy
 def test_mvcrm_cpu_smoke():
     num_splats = 50
 
