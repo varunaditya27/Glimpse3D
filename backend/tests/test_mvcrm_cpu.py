@@ -15,9 +15,14 @@ import os
 import sys
 import tempfile
 
-import numpy as np
 import pytest
-import torch
+
+# Heavy deps live only in the "backend-heavy" CI job (and locally with torch
+# installed). importorskip here so the light/no-torch job skips this module at
+# COLLECTION time instead of erroring before @pytest.mark.heavy can deselect it.
+np = pytest.importorskip("numpy")
+torch = pytest.importorskip("torch")
+pytest.importorskip("plyfile")
 from PIL import Image
 
 # Ensure the repo root is importable (mirrors test_core_modules.py).
