@@ -12,11 +12,22 @@ fastapi / sqlalchemy / pillow / httpx / pytest and never imports torch.
 """
 
 import os
+import sys
 import tempfile
 import uuid
 from pathlib import Path
 
 import pytest
+
+# ---------------------------------------------------------------------------
+# 0. Make the backend root (which contains the `app` package) importable no
+#    matter how pytest is launched. The bare `pytest` console script used in CI
+#    does NOT put the CWD on sys.path the way `python -m pytest` does, so without
+#    this `from app...` inside fixtures/tests fails with ModuleNotFoundError.
+# ---------------------------------------------------------------------------
+_BACKEND_ROOT = Path(__file__).resolve().parent.parent
+if str(_BACKEND_ROOT) not in sys.path:
+    sys.path.insert(0, str(_BACKEND_ROOT))
 
 # ---------------------------------------------------------------------------
 # 1. Point the app at an isolated temp sqlite DB *before* importing anything
