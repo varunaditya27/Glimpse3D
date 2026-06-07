@@ -6,11 +6,14 @@ Responsibilities:
 - Validate data types and required fields
 """
 
+from typing import Optional
+
 from pydantic import BaseModel
 
 class GenerateRequest(BaseModel):
     upload_id: str
     settings: dict = {}
+    client_id: Optional[str] = None
 
 class RefineRequest(BaseModel):
     model_id: str

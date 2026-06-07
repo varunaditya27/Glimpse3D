@@ -43,6 +43,9 @@ class ConnectionManager:
             except Exception as e:
                 logger.error(f"Failed to send message to {client_id}: {e}")
                 self.disconnect(client_id)
+        else:
+            # Unknown or already-disconnected client: log and skip without raising.
+            logger.debug(f"No active connection for client {client_id}; skipping personal message")
 
     async def broadcast(self, message: Dict[str, Any]):
         for client_id in list(self.active_connections.keys()):

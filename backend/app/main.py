@@ -37,7 +37,7 @@ app.mount("/outputs", StaticFiles(directory=str(output_dir)), name="outputs")
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],  # In production, replace with specific frontend origin
-    allow_credentials=True,
+    allow_credentials=False,  # Must be False when allow_origins=["*"] (CORS spec); app uses no cookies/auth
     allow_methods=["*"],
     allow_headers=["*"],
 )

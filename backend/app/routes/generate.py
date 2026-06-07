@@ -32,6 +32,7 @@ repo = get_job_repo()
 class GenerateRequest(BaseModel):
     image_path: str
     output_dir: Optional[str] = None
+    client_id: Optional[str] = None
 
 class GenerateResponse(BaseModel):
     success: bool
@@ -63,6 +64,10 @@ async def generate_3d(request: GenerateRequest, background_tasks: BackgroundTask
             
         output_path = Path(output_dir)
         output_path.mkdir(parents=True, exist_ok=True)
+
+        # Client that owns this job (for targeted WebSocket updates).
+        # If None (older clients), we fall back to broadcast so nothing regresses.
+        client_id = request.client_id
 
         # Store job status
         repo.create(job_id, request.image_path, output_dir)
@@ -110,24 +115,20 @@ async def generate_3d(request: GenerateRequest, background_tasks: BackgroundTask
             # Schedule async send
             try:
                 loop = asyncio.get_running_loop()
-                # We broadcast to the specific job_id if we treat job_id as client_id 
-                # OR we assume client subscribed with some ID. 
-                # Ideally, client connects with a session ID, and we send to that session.
-                # For simplicity here: The frontend uses a fixed ID or we just broadcast to all?
-                # Better: The frontend connects with a distinct Client ID.
-                # But we don't know WHICH client triggered this job here easily unless we pass Client-ID in request.
-                # Let's assume for this MVP we BROADCAST to all connected clients (single user mode) 
-                # OR we update the generate request to accept a client_id.
-                
-                # Using broadcast for MVP reliability in single-user scenario
-                loop.create_task(manager.broadcast(msg))
+                # Send only to the client that owns this job. If the request did
+                # not supply a client_id (older clients), fall back to broadcast
+                # so behavior does not regress.
+                if client_id:
+                    loop.create_task(manager.send_personal_message(msg, client_id))
+                else:
+                    loop.create_task(manager.broadcast(msg))
             except RuntimeError:
                 pass # No loop
 
         pipeline_manager.add_state_callback(update_job_status)
 
         # Run generation in background
-        background_tasks.add_task(run_generation_task, job_id, request.image_path, output_dir)
+        background_tasks.add_task(run_generation_task, job_id, request.image_path, output_dir, client_id)
         
         # Ensure cleanup loop is running
         ensure_cleanup_loop()
@@ -189,7 +190,7 @@ async def get_generation_status(job_id: str):
         'warnings': job.get('warnings', [])
     }
 
-async def run_generation_task(job_id: str, image_path: str, output_dir: str):
+async def run_generation_task(job_id: str, image_path: str, output_dir: str, client_id: Optional[str] = None):
     """Background task to run the generation pipeline."""
     try:
         logger.info(f"Starting generation task {job_id} for {image_path}")
@@ -240,7 +241,10 @@ async def run_generation_task(job_id: str, image_path: str, output_dir: str):
                     "model_url": model_url,
                     "status": "completed"
                 }
-                asyncio.create_task(manager.broadcast(msg))
+                if client_id:
+                    asyncio.create_task(manager.send_personal_message(msg, client_id))
+                else:
+                    asyncio.create_task(manager.broadcast(msg))
             except Exception as ws_e:
                 logger.warning(f"Failed to send WS completion: {ws_e}")
 
@@ -257,7 +261,10 @@ async def run_generation_task(job_id: str, image_path: str, output_dir: str):
                     "error": result.error or 'Pipeline failed',
                     "status": "failed"
                 }
-                asyncio.create_task(manager.broadcast(msg))
+                if client_id:
+                    asyncio.create_task(manager.send_personal_message(msg, client_id))
+                else:
+                    asyncio.create_task(manager.broadcast(msg))
             except Exception:
                 pass
 

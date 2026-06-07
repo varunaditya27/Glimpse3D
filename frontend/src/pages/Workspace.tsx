@@ -202,6 +202,19 @@ export const Workspace = () => {
     // Toast State
     const [toasts, setToasts] = useState<ToastMsg[]>([]);
 
+    const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
+
+    // Stable client id (created once) shared by the WebSocket URL and the /generate body.
+    const clientIdRef = useRef<string>(crypto.randomUUID());
+    // Current job id mirror for use inside the WS handler / polling closures.
+    const jobIdRef = useRef<string | null>(null);
+    // Active status-poll interval (fallback when the WS closes early).
+    const pollIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
+
+    // Resolve backend-relative paths (e.g. /outputs/...) against API_URL so assets
+    // load correctly when VITE_API_URL points at a remote Colab tunnel.
+    const toAbs = (u?: string | null) => (u && u.startsWith('/')) ? `${API_URL}${u}` : u;
+
     const addToast = (message: string, type: ToastType = 'info') => {
         const id = Math.random().toString(36).substring(7);
         setToasts(prev => [...prev, { id, type, message }]);
@@ -232,7 +245,7 @@ export const Workspace = () => {
 
         try {
             // 1. Upload
-            const uploadRes = await fetch('/upload/', {
+            const uploadRes = await fetch(`${API_URL}/upload/`, {
                 method: 'POST',
                 body: formData,
             });
@@ -253,7 +266,7 @@ export const Workspace = () => {
 
     const fetchMetadata = async (id: string) => {
         try {
-            const res = await fetch(`/export/metadata/${id}`);
+            const res = await fetch(`${API_URL}/export/metadata/${id}`);
             const data = await res.json();
             setMetadata(data);
         } catch (e) {
@@ -261,18 +274,68 @@ export const Workspace = () => {
         }
     };
 
+    // Apply a terminal/progress status payload (shared by WS and polling fallback).
+    const applyStatusPayload = (data: any) => {
+        if (data.status) setStatus(data.status);
+        if (data.progress !== undefined) setProgress(data.progress);
+        if (data.message) setStatusText(data.message);
+
+        const isCompleted = data.type === 'job_completed' || data.status === 'completed';
+        const isFailed = data.type === 'job_failed' || data.status === 'failed';
+
+        if (isCompleted) {
+            if (data.model_url) setResultUrl(toAbs(data.model_url) ?? null);
+            setStatus('enhanced');
+            setStatusText('Generation complete');
+            setProgress(1.0);
+            setIsGenerating(false);
+            if (data.job_id) fetchMetadata(data.job_id);
+            addToast("Model Generation Complete!", 'success');
+            stopPolling();
+        } else if (isFailed) {
+            setStatus('idle');
+            setStatusText(`Failed: ${data.error}`);
+            addToast(`Generation Failed: ${data.error}`, 'error');
+            setIsGenerating(false);
+            stopPolling();
+        }
+    };
+
+    const stopPolling = () => {
+        if (pollIntervalRef.current) {
+            clearInterval(pollIntervalRef.current);
+            pollIntervalRef.current = null;
+        }
+    };
+
+    // Fallback: poll status every 3s until a terminal state (used if the WS closes early).
+    const startPolling = (id: string) => {
+        stopPolling();
+        pollIntervalRef.current = setInterval(async () => {
+            try {
+                const res = await fetch(`${API_URL}/generate/status/${id}`);
+                if (!res.ok) return;
+                const data = await res.json();
+                if (data.job_id && data.job_id !== jobIdRef.current) return;
+                applyStatusPayload(data);
+            } catch (e) {
+                console.error("Status poll error:", e);
+            }
+        }, 3000);
+    };
+
     // WebSocket Connection
     useEffect(() => {
-        // Connect to WebSocket
-        const clientId = `client_${Math.floor(Math.random() * 1000)}`;
-        const wsUrl = `${(import.meta.env.VITE_API_URL || 'http://localhost:8000').replace('http', 'ws')}/ws/${clientId}`;
+        // Connect to WebSocket using the stable client id (shared with /generate).
+        const clientId = clientIdRef.current;
+        const wsUrl = `${API_URL.replace('http', 'ws')}/ws/${clientId}`;
 
         console.log("Connecting to WebSocket:", wsUrl);
         const ws = new WebSocket(wsUrl);
 
         ws.onopen = () => {
             console.log("WebSocket connected");
-            // addToast("Connected to Server", 'success'); 
+            // addToast("Connected to Server", 'success');
         };
 
         ws.onmessage = (event) => {
@@ -280,15 +343,10 @@ export const Workspace = () => {
                 const data = JSON.parse(event.data);
                 console.log("WS Message:", data);
 
-                // Filter for our current job if strictly needed, 
-                // but for now we consume all updates (single user assumption or "active job" logic)
-                // If data.job_id matches our current jobId (if set) OR if we are just waiting for any job we started.
+                // Ignore messages tagged with a different job id (another client's job).
+                if (data.job_id && data.job_id !== jobIdRef.current) return;
 
                 if (data.type === 'progress_update') {
-                    // Only update if it matches our job OR if we are in a state where we accept updates
-                    // Ideally check data.job_id === jobId
-                    // But jobId might be state variable.
-
                     if (data.status) setStatus(data.status);
                     if (data.progress !== undefined) setProgress(data.progress);
                     if (data.message) setStatusText(data.message);
@@ -299,10 +357,9 @@ export const Workspace = () => {
                 }
                 else if (data.type === 'job_completed') {
                     if (data.model_url) {
-                        setResultUrl(data.model_url); // This is absolute path in backend logic?
-                        // Backend sends /outputs/... relative to domain root
-                        // setStatus('completed'); // 'enhanced' is usually the final state for UI visibility?
-                        // Let's stick to status from backend 'completed' mapping to our UI 'enhanced' or 'viewer'
+                        // Backend sends a root-relative /outputs/... path; resolve it
+                        // against API_URL so it loads through a remote tunnel too.
+                        setResultUrl(toAbs(data.model_url) ?? null);
                         setStatus('enhanced');
                         setStatusText('Generation complete');
                         setProgress(1.0);
@@ -312,6 +369,7 @@ export const Workspace = () => {
                         if (data.job_id) fetchMetadata(data.job_id);
 
                         addToast("Model Generation Complete!", 'success');
+                        stopPolling();
                     }
                 }
                 else if (data.type === 'job_failed') {
@@ -320,6 +378,7 @@ export const Workspace = () => {
                     // alert(`Generation Failed: ${data.error}`); // Use Toast instead
                     addToast(`Generation Failed: ${data.error}`, 'error');
                     setIsGenerating(false);
+                    stopPolling();
                 }
 
             } catch (e) {
@@ -334,10 +393,15 @@ export const Workspace = () => {
 
         ws.onclose = () => {
             console.log("WebSocket disconnected");
+            // If a job is still running, fall back to HTTP polling until terminal.
+            if (jobIdRef.current) {
+                startPolling(jobIdRef.current);
+            }
         };
 
         return () => {
             ws.close();
+            stopPolling();
         };
     }, []); // Run once on mount
 
@@ -355,8 +419,6 @@ export const Workspace = () => {
         const formData = new FormData();
         formData.append('file', file);
 
-        const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
         try {
             // 1. Upload
             const uploadRes = await fetch(`${API_URL}/upload`, { method: 'POST', body: formData });
@@ -371,17 +433,18 @@ export const Workspace = () => {
             const genRes = await fetch(`${API_URL}/generate`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ image_path: imagePath })
+                body: JSON.stringify({ image_path: imagePath, client_id: clientIdRef.current })
             });
 
             if (!genRes.ok) throw new Error('Generation start failed');
             const genData = await genRes.json();
 
+            jobIdRef.current = genData.job_id;
             setJobId(genData.job_id);
             console.log("Job started:", genData.job_id);
 
             // Revert pollStatus call - We now rely on WebSocket
-            // pollStatus(genData.job_id); 
+            // pollStatus(genData.job_id);
 
         } catch (e: any) {
             console.error("Polling error", e);
@@ -436,8 +499,6 @@ export const Workspace = () => {
             const { azimuth, elevation, radius } = cameraPoseRef.current;
             console.log(`Enhancing View: Azi=${azimuth.toFixed(1)}, Elev=${elevation.toFixed(1)}, Rad=${radius.toFixed(1)}`);
 
-            const API_URL = import.meta.env.VITE_API_URL || 'http://localhost:8000';
-
             const res = await fetch(`${API_URL}/refine`, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json' },
@@ -470,8 +531,11 @@ export const Workspace = () => {
             if (data.status === 'completed') {
                 setStatus('enhanced');
                 setStatusText('Enhancement Complete!');
-                setResultUrl(data.updated_model_url);
-                // We could show comparison images too if we had UI for it
+                setResultUrl(toAbs(data.updated_model_url) ?? null);
+                // Comparison images (if present) are also backend-relative; absolutize them.
+                if (Array.isArray(data.comparison_images)) {
+                    data.comparison_images = data.comparison_images.map((u: string) => toAbs(u));
+                }
                 setIsGenerating(false);
                 addToast("Enhancement Successful!", 'success');
             }
@@ -496,7 +560,7 @@ export const Workspace = () => {
                 // but for proper error handling we might want fetch.
                 // Let's use window.location for simplicity if it works, but fetch allows us to catch 404/500 better.
 
-                const response = await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:8000'}/export/${jobId}?format=${exportFormat}`);
+                const response = await fetch(`${API_URL}/export/${jobId}?format=${exportFormat}`);
 
                 if (!response.ok) {
                     const err = await response.json();
@@ -528,6 +592,8 @@ export const Workspace = () => {
     };
 
     const handleReset = () => {
+        stopPolling();
+        jobIdRef.current = null;
         setStatus('idle');
         setProgress(0);
         setStatusText('');
@@ -586,14 +652,6 @@ export const Workspace = () => {
                         <ToolButton icon={Sparkles} label="AI Lab" active={activeTool === 'ai'} onClick={() => setActiveTool('ai')} />
                         <ToolButton icon={Download} label="Export" active={activeTool === 'export'} onClick={() => setActiveTool('export')} />
                     </div>
-                </div>
-
-                <div style={{ position: 'absolute', top: 10, left: 80, zIndex: 9999, background: 'rgba(0,0,0,0.8)', color: '#0f0', padding: '10px', fontSize: '12px', fontFamily: 'monospace', pointerEvents: 'none' }}>
-                    <div>STATUS: {status}</div>
-                    <div>URL: {resultUrl || 'null'}</div>
-                    <div>JOB: {jobId || 'null'}</div>
-                    <div>ERR: {statusText || 'none'}</div>
-                    <div>PROG: {progress}%</div>
                 </div>
 
                 {/* Center - Canvas */}
