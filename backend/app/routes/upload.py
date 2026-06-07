@@ -54,6 +54,26 @@ async def upload_image(file: UploadFile = File(...)):
         except Exception as e:
             raise HTTPException(status_code=400, detail="Invalid image file. Please upload a valid image.")
 
+        # 2b. Deep image validation (Phase 6).
+        # Defensive: a validator/dependency failure must NOT break upload.
+        # If the validator runs and reports the image is invalid, we surface
+        # a 400-style JSON to the client. Any internal failure (missing optional
+        # deps, unexpected errors) is logged and we fall through to saving.
+        try:
+            from ..services.image_validator import get_validator
+            validation_result = get_validator().validate_and_process(content, file.filename)
+            if not validation_result.get("valid", True):
+                return {
+                    "success": False,
+                    "error": validation_result.get("error", "Image failed validation."),
+                    "details": validation_result.get("validation_metadata"),
+                }
+        except Exception as val_err:
+            from ..core.logger import get_logger
+            get_logger(__name__).warning(
+                f"Image validator unavailable or errored; proceeding with upload: {val_err}"
+            )
+
         # 3. Save File
         from ..core.config import settings
         upload_dir = settings.PROJECT_ROOT / "assets" / "uploads"

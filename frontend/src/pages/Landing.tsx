@@ -65,6 +65,16 @@ export const Landing = () => {
                             <Button
                                 variant="outline"
                                 size="lg"
+                                onClick={() => navigate('/compare')}
+                                style={{ backdropFilter: 'blur(10px)' }}
+                            >
+                                Compare Models
+                            </Button>
+                        </motion.div>
+                        <motion.div whileHover={{ scale: 1.05 }} whileTap={{ scale: 0.95 }}>
+                            <Button
+                                variant="outline"
+                                size="lg"
                                 onClick={() => window.open('https://github.com/varunaditya27/Glimpse3D', '_blank')}
                                 style={{ backdropFilter: 'blur(10px)' }}
                             >

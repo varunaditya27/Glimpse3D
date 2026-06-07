@@ -4,9 +4,10 @@ python-multipart
 pydantic
 torch
 torchvision
-numpy
+numpy                    # image validator: array ops (also used elsewhere)
 Pillow
-rembg
+rembg                    # image validator: background removal (pulls onnxruntime)
+opencv-python-headless   # image validator: blur/blank checks + connected-components object detection
 diffusers
 transformers
 accelerate

@@ -48,7 +48,7 @@ async def root():
     return {"message": "Glimpse3D Backend is running"}
 
 # Import routers
-from .routes import upload, generate, refine, export
+from .routes import upload, generate, refine, export, compare
 
 # WebSocket Endpoint
 from fastapi import WebSocket, WebSocketDisconnect
@@ -74,6 +74,7 @@ app.include_router(upload.router)
 app.include_router(generate.router)
 app.include_router(refine.router)
 app.include_router(export.router)
+app.include_router(compare.router)
 
 
 if __name__ == "__main__":
