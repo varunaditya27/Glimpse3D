@@ -33,11 +33,17 @@ output_dir.mkdir(parents=True, exist_ok=True)
 
 app.mount("/outputs", StaticFiles(directory=str(output_dir)), name="outputs")
 
-# CORS Configuration
+# CORS Configuration.
+# Origins come from settings (CORS_ALLOW_ORIGINS env, default "*"). Credentials
+# stay False: with "*" the CORS spec forbids credentials, and the app is
+# token/cookie-free anyway.
+from .core.config import settings as _settings
+
+_cors_origins = _settings.cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific frontend origin
-    allow_credentials=False,  # Must be False when allow_origins=["*"] (CORS spec); app uses no cookies/auth
+    allow_origins=_cors_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )

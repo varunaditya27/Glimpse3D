@@ -34,13 +34,16 @@ async def refine_model_endpoint(request: RefineRequest):
     """
     try:
         model_id = request.model_id
-        
-        # Path Resolution (Assuming standard project structure)
-        # assets/outputs/{model_id}/reconstructed.ply
-        # This needs to match where generate.py saves things.
-        # Based on generate.py (viewed earlier), output dir is assets/outputs/{upload_id}
+
+        # Path Resolution (confined to assets/outputs/{model_id} — no traversal).
         from ..core.config import settings
-        model_dir = settings.PROJECT_ROOT / "assets" / "outputs" / model_id
+        from ..core.paths import safe_subdir
+
+        outputs_root = settings.PROJECT_ROOT / "assets" / "outputs"
+        try:
+            model_dir = safe_subdir(outputs_root, model_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid model id.")
         input_ply = model_dir / "reconstructed.ply"
         
         # If reconstructed.ply doesn't exist, try ANY ply

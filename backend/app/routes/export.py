@@ -4,8 +4,81 @@ from pathlib import Path
 from fastapi import APIRouter, HTTPException
 from fastapi.responses import FileResponse
 
+from ..core.config import settings
+from ..core.paths import safe_subdir
+
 router = APIRouter(prefix="/export", tags=["Export"])
 logger = logging.getLogger(__name__)
+
+
+def _model_dir(model_id: str) -> Path:
+    """Resolve assets/outputs/<model_id>, rejecting path traversal."""
+    outputs_root = settings.PROJECT_ROOT / "assets" / "outputs"
+    try:
+        return safe_subdir(outputs_root, model_id)
+    except ValueError:
+        raise HTTPException(status_code=400, detail="Invalid model id.")
+
+
+def _locate_ply(model_dir: Path) -> Path:
+    """Find the best PLY in a model dir (reconstructed > optimized > any)."""
+    candidate = model_dir / "reconstructed.ply"
+    if candidate.exists():
+        return candidate
+    refined = list(model_dir.glob("*_optimized.ply"))
+    if refined:
+        return refined[0]
+    any_ply = list(model_dir.glob("*.ply"))
+    if any_ply:
+        return any_ply[0]
+    raise HTTPException(status_code=404, detail="Model file not found")
+
+
+@router.get("/metadata/{model_id}")
+async def model_metadata(model_id: str):
+    """Lightweight metadata for a generated model (vertex count, format, size).
+
+    Backs the frontend's project panel. Never raises for a missing model — it
+    returns zeroed metadata so the UI degrades gracefully.
+    """
+    model_dir = _model_dir(model_id)
+    try:
+        ply = _locate_ply(model_dir)
+    except HTTPException:
+        return {"vertex_count": 0, "format": "-", "file_size_human": "-"}
+
+    size_bytes = ply.stat().st_size
+    vertex_count = 0
+    try:
+        from plyfile import PlyData
+        vertex_count = int(PlyData.read(str(ply))["vertex"].count)
+    except Exception:
+        # plyfile missing or header unreadable: fall back to a header scan.
+        try:
+            with open(ply, "rb") as fh:
+                for _ in range(60):
+                    line = fh.readline().decode("ascii", "ignore").strip()
+                    if line.startswith("element vertex"):
+                        vertex_count = int(line.split()[-1])
+                        break
+                    if line == "end_header":
+                        break
+        except Exception:
+            vertex_count = 0
+
+    def _human(n: float) -> str:
+        for unit in ("B", "KB", "MB", "GB"):
+            if n < 1024.0:
+                return f"{n:.1f} {unit}"
+            n /= 1024.0
+        return f"{n:.1f} TB"
+
+    return {
+        "vertex_count": vertex_count,
+        "format": ply.suffix.lstrip(".").upper() or "PLY",
+        "file_size_human": _human(size_bytes),
+    }
+
 
 @router.get("/{model_id}")
 async def export_model(model_id: str, format: str = "ply"):
@@ -17,25 +90,11 @@ async def export_model(model_id: str, format: str = "ply"):
         if format not in ["ply", "glb", "obj"]:
              raise HTTPException(status_code=400, detail="Unsupported format. Use: ply, glb, obj")
 
-        # Locate Model
-        from ..core.config import settings
-        model_dir = settings.PROJECT_ROOT / "assets" / "outputs" / model_id
-        
-        # Allow exporting refined vs original
-        # Prioritize refined if available? No, user probably wants current state.
-        # For simplicity, we look for 'reconstructed.ply' or '*.ply'
-        # Ideally, frontend passes specific filename.
-        input_ply = model_dir / "reconstructed.ply"
-        if not input_ply.exists():
-            refined_files = list(model_dir.glob("*_optimized.ply"))
-            if refined_files:
-                input_ply = refined_files[0]
-            else:
-                 ply_files = list(model_dir.glob("*.ply"))
-                 if ply_files:
-                     input_ply = ply_files[0]
-                 else:
-                     raise HTTPException(status_code=404, detail="Model file not found")
+        # Locate Model (model_id confined to assets/outputs).
+        model_dir = _model_dir(model_id)
+
+        # Pick the best available PLY (reconstructed > optimized > any).
+        input_ply = _locate_ply(model_dir)
 
         # Case 1: PLY (Direct Pass-through)
         if format == "ply":

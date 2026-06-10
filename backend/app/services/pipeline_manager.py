@@ -74,18 +74,24 @@ class PipelineManager:
 
     def __init__(self):
         self.logger = logger
+        # Legacy process-wide callbacks. Per-job progress is delivered via the
+        # explicit progress_callback argument to run_pipeline instead; this list
+        # stays only for any external caller that still registers one.
         self.state_callbacks: List[callable] = []
 
     def add_state_callback(self, callback: callable):
-        """Add callback for state updates."""
+        """Register a process-wide state callback (legacy).
+
+        Prefer passing progress_callback to run_pipeline: that path keeps
+        per-job state isolated and does not accumulate callbacks across
+        requests.
+        """
         self.state_callbacks.append(callback)
-        self._current_stage = PipelineStage.UPLOADED
 
     def _update_state(self, stage: PipelineStage, progress: float, message: str,
                      current_file: Optional[str] = None, error: Optional[str] = None,
                      warnings: List[str] = None):
-        """Update pipeline state and notify callbacks."""
-        self._current_stage = stage
+        """Notify legacy process-wide callbacks (no per-job state stored)."""
         state = PipelineState(
             stage=stage,
             progress=progress,
@@ -94,20 +100,23 @@ class PipelineManager:
             error=error,
             warnings=warnings or []
         )
-
         for callback in self.state_callbacks:
             try:
                 callback(state)
             except Exception as e:
                 self.logger.warning(f"State callback failed: {e}")
 
-    async def run_pipeline(self, image_path: str, output_dir: Optional[str] = None) -> PipelineResult:
+    async def run_pipeline(self, image_path: str, output_dir: Optional[str] = None,
+                           progress_callback: Optional[callable] = None) -> PipelineResult:
         """
         Execute the complete Glimpse3D pipeline.
 
         Args:
             image_path: Path to input image
             output_dir: Directory for outputs (temp dir if None)
+            progress_callback: Optional per-job callable(PipelineState). All
+                progress for THIS run is delivered here, keeping concurrent jobs
+                fully isolated (no shared mutable state).
 
         Returns:
             PipelineResult with success status and outputs
@@ -122,18 +131,43 @@ class PipelineManager:
         metrics = {}
         all_warnings = []
 
+        # Per-run stage tracker (local, not instance state) so two concurrent
+        # runs never clobber each other's "current stage".
+        current_stage = PipelineStage.UPLOADED
+
+        def emit(stage: PipelineStage, progress: float, message: str,
+                 current_file: Optional[str] = None, error: Optional[str] = None,
+                 warnings: Optional[List[str]] = None):
+            nonlocal current_stage
+            current_stage = stage
+            state = PipelineState(
+                stage=stage, progress=progress, message=message,
+                current_file=current_file, error=error, warnings=warnings or [],
+            )
+            # Per-job callback first, then any legacy process-wide callbacks.
+            if progress_callback is not None:
+                try:
+                    progress_callback(state)
+                except Exception as e:
+                    self.logger.warning(f"Progress callback failed: {e}")
+            for callback in self.state_callbacks:
+                try:
+                    callback(state)
+                except Exception as e:
+                    self.logger.warning(f"State callback failed: {e}")
+
         try:
             # Stage 1: Coarse Reconstruction
-            self._update_state(PipelineStage.COARSE_RECONSTRUCTION, 0.1,
-                             "Starting coarse 3D reconstruction...", warnings=all_warnings)
+            emit(PipelineStage.COARSE_RECONSTRUCTION, 0.1,
+                 "Starting coarse 3D reconstruction...", warnings=all_warnings)
 
             coarse_model_path, w = await self._run_coarse_reconstruction(image_path, output_path)
             all_warnings.extend(w)
             intermediate_files['coarse_model'] = coarse_model_path
 
             # Stage 2: Multi-view Generation
-            self._update_state(PipelineStage.MULTI_VIEW_GENERATION, 0.3,
-                             "Generating additional views...", warnings=all_warnings)
+            emit(PipelineStage.MULTI_VIEW_GENERATION, 0.3,
+                 "Generating additional views...", warnings=all_warnings)
 
             try:
                 views_data, w = await self._run_multi_view_generation(image_path, output_path)
@@ -145,8 +179,8 @@ class PipelineManager:
                 views_data = {}
 
             # Stage 3: Depth Estimation
-            self._update_state(PipelineStage.DEPTH_ESTIMATION, 0.4,
-                             "Estimating depth maps...", warnings=all_warnings)
+            emit(PipelineStage.DEPTH_ESTIMATION, 0.4,
+                 "Estimating depth maps...", warnings=all_warnings)
 
             try:
                 depth_data, w = await self._run_depth_estimation(views_data, output_path)
@@ -158,8 +192,8 @@ class PipelineManager:
                 depth_data = {}
 
             # Stage 4: Diffusion Enhancement
-            self._update_state(PipelineStage.DIFFUSION_ENHANCEMENT, 0.6,
-                             "Enhancing views with diffusion...", warnings=all_warnings)
+            emit(PipelineStage.DIFFUSION_ENHANCEMENT, 0.6,
+                 "Enhancing views with diffusion...", warnings=all_warnings)
 
             try:
                 enhanced_views, w = await self._run_diffusion_enhancement(views_data, depth_data, output_path)
@@ -171,8 +205,8 @@ class PipelineManager:
                 enhanced_views = views_data
 
             # Stage 5: Refinement
-            self._update_state(PipelineStage.REFINEMENT, 0.8,
-                             "Refining 3D model...", warnings=all_warnings)
+            emit(PipelineStage.REFINEMENT, 0.8,
+                 "Refining 3D model...", warnings=all_warnings)
 
             try:
                 refined_model_path, w = await self._run_refinement(
@@ -187,14 +221,14 @@ class PipelineManager:
             intermediate_files['refined_model'] = refined_model_path
 
             # Stage 6: Export
-            self._update_state(PipelineStage.EXPORT, 0.95,
-                             "Exporting final model...", warnings=all_warnings)
+            emit(PipelineStage.EXPORT, 0.95,
+                 "Exporting final model...", warnings=all_warnings)
 
             final_model_path = await self._run_export(refined_model_path, output_path)
             intermediate_files['final_model'] = final_model_path
 
-            self._update_state(PipelineStage.COMPLETED, 1.0,
-                             "Pipeline completed successfully!", warnings=all_warnings)
+            emit(PipelineStage.COMPLETED, 1.0,
+                 "Pipeline completed successfully!", warnings=all_warnings)
 
             return PipelineResult(
                 success=True,
@@ -206,10 +240,10 @@ class PipelineManager:
             )
 
         except Exception as e:
-            error_msg = f"Pipeline failed at stage {self._current_stage}: {str(e)}"
+            error_msg = f"Pipeline failed at stage {current_stage}: {str(e)}"
             self.logger.error(error_msg, exc_info=True)
 
-            self._update_state(PipelineStage.FAILED, 0.0, error_msg, error=error_msg)
+            emit(PipelineStage.FAILED, 0.0, error_msg, error=error_msg)
 
             # DEMO_MODE may attach a clearly-labeled placeholder model so the demo
             # can render something. It is NEVER reported as success.

@@ -32,4 +32,18 @@ class Settings:
     SUPABASE_SERVICE_ROLE_KEY: str = os.getenv("SUPABASE_SERVICE_ROLE_KEY", "")
     SUPABASE_ANON_KEY: str = os.getenv("SUPABASE_ANON_KEY", "")
 
+    # CORS. Default "*" keeps the public Colab-tunnel demo working out of the
+    # box; set CORS_ALLOW_ORIGINS to a comma-separated allowlist in production.
+    CORS_ALLOW_ORIGINS: str = os.getenv("CORS_ALLOW_ORIGINS", "*")
+
+    # Upload limits (DoS hardening): max decoded megapixels for an uploaded image.
+    MAX_IMAGE_MEGAPIXELS: float = float(os.getenv("MAX_IMAGE_MEGAPIXELS", "40"))
+
+    @property
+    def cors_origins(self) -> list:
+        raw = (self.CORS_ALLOW_ORIGINS or "*").strip()
+        if raw == "*":
+            return ["*"]
+        return [o.strip() for o in raw.split(",") if o.strip()]
+
 settings = Settings()

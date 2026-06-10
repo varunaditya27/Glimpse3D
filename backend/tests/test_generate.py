@@ -6,10 +6,11 @@ generate.pipeline_manager.run_pipeline with a fake coroutine returning a
 PipelineResult. TestClient executes BackgroundTasks synchronously after the
 response is returned, so by the time client.post() returns, the (fake) pipeline
 has already finished and the job row reflects the terminal state.
-"""
 
-import os
-import tempfile
+The input image MUST live inside assets/uploads (the route confines image_path
+to that tree to block arbitrary-file access). We point settings.PROJECT_ROOT at
+a temp dir so the whole upload/output tree is isolated per test.
+"""
 
 import pytest
 
@@ -27,23 +28,30 @@ class _FakePipelineResult:
 
 
 @pytest.fixture()
-def image_file():
-    """A real file on disk so the route's os.path.exists() check passes."""
-    fd, path = tempfile.mkstemp(suffix=".png")
-    os.write(fd, b"\x89PNG\r\n\x1a\nfake")
-    os.close(fd)
-    yield path
-    try:
-        os.remove(path)
-    except OSError:
-        pass
+def isolated_root(monkeypatch, tmp_path):
+    """Point settings.PROJECT_ROOT at a temp dir and return its uploads dir."""
+    from app.core.config import settings
+
+    monkeypatch.setattr(settings, "PROJECT_ROOT", tmp_path)
+    uploads = tmp_path / "assets" / "uploads"
+    uploads.mkdir(parents=True, exist_ok=True)
+    return uploads
+
+
+@pytest.fixture()
+def image_file(isolated_root):
+    """A real image file inside the (temp) uploads tree so confinement passes."""
+    path = isolated_root / "input.png"
+    path.write_bytes(b"\x89PNG\r\n\x1a\nfake")
+    return str(path)
 
 
 def _patch_pipeline(monkeypatch, result):
     """Replace the module-level pipeline_manager.run_pipeline with a fake."""
     from app.routes import generate
 
-    async def _fake_run_pipeline(image_path, output_dir=None):
+    async def _fake_run_pipeline(image_path, output_dir=None, progress_callback=None):
+        # Exercise the per-job progress callback path if one was supplied.
         return result
 
     monkeypatch.setattr(generate.pipeline_manager, "run_pipeline", _fake_run_pipeline)
@@ -55,10 +63,7 @@ def test_generate_creates_job_and_status_returns_it(client, monkeypatch, image_f
     result = _FakePipelineResult(success=True, final_model_path=fake_model)
     _patch_pipeline(monkeypatch, result)
 
-    resp = client.post(
-        "/generate/",
-        json={"image_path": image_file, "output_dir": str(tmp_path)},
-    )
+    resp = client.post("/generate/", json={"image_path": image_file})
     assert resp.status_code == 200, resp.text
     body = resp.json()
     assert body["success"] is True
@@ -74,14 +79,11 @@ def test_generate_creates_job_and_status_returns_it(client, monkeypatch, image_f
     assert status["result"]["model_url"]
 
 
-def test_generate_marks_failed_when_pipeline_fails(client, monkeypatch, image_file, tmp_path):
+def test_generate_marks_failed_when_pipeline_fails(client, monkeypatch, image_file):
     result = _FakePipelineResult(success=False, error="synthetic pipeline failure")
     _patch_pipeline(monkeypatch, result)
 
-    resp = client.post(
-        "/generate/",
-        json={"image_path": image_file, "output_dir": str(tmp_path)},
-    )
+    resp = client.post("/generate/", json={"image_path": image_file})
     assert resp.status_code == 200, resp.text
     job_id = resp.json()["job_id"]
 
@@ -90,18 +92,31 @@ def test_generate_marks_failed_when_pipeline_fails(client, monkeypatch, image_fi
     assert "synthetic pipeline failure" in (status["error"] or "")
 
 
-def test_generate_missing_image_returns_error(client, monkeypatch, tmp_path):
+def test_generate_missing_image_returns_error(client, monkeypatch, isolated_root):
     # Patch so even if the check passed we would not run the real pipeline.
     _patch_pipeline(monkeypatch, _FakePipelineResult(success=True, final_model_path="x"))
 
     resp = client.post(
         "/generate/",
-        json={"image_path": str(tmp_path / "no_such_image.png")},
+        json={"image_path": str(isolated_root / "no_such_image.png")},
     )
-    # Route raises HTTPException(400) -> wrapped/re-raised as 500 only on
-    # unexpected errors; the explicit 400 path bubbles as 400's detail under a
-    # 500 envelope per the route's try/except. Accept either client/server error.
-    assert resp.status_code in (400, 500)
+    # Missing-but-in-tree file -> 404; the route never reaches the pipeline.
+    assert resp.status_code in (400, 404)
+
+
+def test_generate_rejects_path_traversal(client, monkeypatch, isolated_root, tmp_path):
+    """An absolute image_path to a real file OUTSIDE uploads must be refused.
+
+    This is the exact arbitrary-file-access vector: a secret that exists on disk
+    but lives outside the uploads tree must never be accepted as an input image.
+    """
+    _patch_pipeline(monkeypatch, _FakePipelineResult(success=True, final_model_path="x"))
+
+    secret = tmp_path / "secret.txt"  # sibling of assets/uploads, not inside it
+    secret.write_text("top secret")
+
+    resp = client.post("/generate/", json={"image_path": str(secret)})
+    assert resp.status_code == 400
 
 
 def test_status_unknown_job_returns_404(client):
