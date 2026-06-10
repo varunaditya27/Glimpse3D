@@ -11,6 +11,8 @@ Responsibilities:
 - Health check endpoints
 """
 
+import os
+
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 
@@ -31,11 +33,17 @@ output_dir.mkdir(parents=True, exist_ok=True)
 
 app.mount("/outputs", StaticFiles(directory=str(output_dir)), name="outputs")
 
-# CORS Configuration
+# CORS Configuration.
+# Origins come from settings (CORS_ALLOW_ORIGINS env, default "*"). Credentials
+# stay False: with "*" the CORS spec forbids credentials, and the app is
+# token/cookie-free anyway.
+from .core.config import settings as _settings
+
+_cors_origins = _settings.cors_origins
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],  # In production, replace with specific frontend origin
-    allow_credentials=True,
+    allow_origins=_cors_origins,
+    allow_credentials=False,
     allow_methods=["*"],
     allow_headers=["*"],
 )
@@ -46,7 +54,7 @@ async def root():
     return {"message": "Glimpse3D Backend is running"}
 
 # Import routers
-from .routes import upload, generate, refine, export
+from .routes import upload, generate, refine, export, compare
 
 # WebSocket Endpoint
 from fastapi import WebSocket, WebSocketDisconnect
@@ -72,4 +80,11 @@ app.include_router(upload.router)
 app.include_router(generate.router)
 app.include_router(refine.router)
 app.include_router(export.router)
+app.include_router(compare.router)
+
+
+if __name__ == "__main__":
+    import uvicorn
+    port = int(os.getenv("PORT", "8000"))
+    uvicorn.run(app, host="0.0.0.0", port=port)
 

@@ -56,6 +56,55 @@ This makes Glimpse3D both:
 
 ---
 
+# **🏃 Run it**
+
+The real deployment is **split**: the GPU-heavy **backend runs on a free Colab GPU**, and the **frontend runs locally** on your machine and talks to it over a public tunnel.
+
+### **1. Start the backend on Colab (GPU)**
+
+Open [`notebooks/Glimpse3D_Serve_Backend.ipynb`](notebooks/Glimpse3D_Serve_Backend.ipynb) in Colab on a **GPU runtime** (Runtime → Change runtime type → GPU) and **Run all**. The notebook:
+
+1. Clones the repo and installs the backend dependencies.
+2. Downloads the model weights via `scripts/download_weights.py` (~6 GB).
+3. Launches the FastAPI server on `0.0.0.0:8000`.
+4. Exposes it through a **public Cloudflare tunnel** and **prints the tunnel URL**.
+
+### **2. Start the frontend locally**
+
+On your own machine, point the frontend at the tunnel URL and run the dev server:
+
+```bash
+cd frontend
+npm install
+# set VITE_API_URL to the tunnel URL printed by the Colab notebook
+#   (frontend/.env)   VITE_API_URL=https://your-tunnel.trycloudflare.com
+npm run dev
+```
+
+Open the local URL Vite prints (usually `http://localhost:5173`). The app sends all API and WebSocket traffic to the GPU-backed Colab backend through the tunnel — the WebSocket URL is derived automatically (`https` → `wss`).
+
+> For a no-GPU UI walkthrough or backend smoke test, see [`docs/RUNNING.md`](docs/RUNNING.md), which also documents the full GPU run end to end.
+
+---
+
+# **🆕 Architecture / what's new**
+
+Recent work hardened Glimpse3D from a notebook pipeline into a serviceable app:
+
+* **Persistent jobs** — generation jobs are tracked in a real repository (default **SQLite**, optional **Supabase**) instead of in-memory state, so status survives restarts.
+* **Input validation** — uploads are size-, format-, and content-validated before they enter the pipeline.
+* **A/B compare view** — pick two completed reconstructions and view them side by side (`/compare/projects`, `/compare/{id1}/{id2}`).
+* **WebSocket job correlation** — clients connect with a per-client id (`/ws/{client_id}`); progress and completion updates are routed to the owning client (with broadcast fallback for older clients).
+* **Completed MVCRM refinement** — multi-view consistent refinement (depth consistency, normal smoothing, feature fusion) is wired into the pipeline.
+
+---
+
+# **📍 Status**
+
+The code is **complete and CPU-verified**: the **frontend build** passes, the **backend API tests** pass, and the **MVCRM CPU round-trip** runs end to end without a GPU. **Generative visual quality** (TripoSR → SyncDreamer → SDXL → gsplat) is validated on a **Colab T4 GPU run** — that is where the heavy models produce their real output.
+
+---
+
 # **🚀 Quick Start (Google Colab)**
 
 The fastest way to try Glimpse3D is via our **production-ready Colab notebook**:

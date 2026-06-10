@@ -27,7 +27,7 @@ if %errorlevel% neq 0 (
 
 echo.
 echo [3/4] Checking Weights...
-if not exist "ai_modules/sync_dreamer/checkpoints/syncdreamer-pretrain.ckpt" (
+if not exist "ai_modules/sync_dreamer/ckpt/syncdreamer-pretrain.ckpt" (
     echo [WARNING] SyncDreamer weights missing!
     echo Please run: python scripts/download_weights.py
     pause

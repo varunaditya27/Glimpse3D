@@ -34,13 +34,16 @@ async def refine_model_endpoint(request: RefineRequest):
     """
     try:
         model_id = request.model_id
-        
-        # Path Resolution (Assuming standard project structure)
-        # assets/outputs/{model_id}/reconstructed.ply
-        # This needs to match where generate.py saves things.
-        # Based on generate.py (viewed earlier), output dir is assets/outputs/{upload_id}
+
+        # Path Resolution (confined to assets/outputs/{model_id} — no traversal).
         from ..core.config import settings
-        model_dir = settings.PROJECT_ROOT / "assets" / "outputs" / model_id
+        from ..core.paths import safe_subdir
+
+        outputs_root = settings.PROJECT_ROOT / "assets" / "outputs"
+        try:
+            model_dir = safe_subdir(outputs_root, model_id)
+        except ValueError:
+            raise HTTPException(status_code=400, detail="Invalid model id.")
         input_ply = model_dir / "reconstructed.ply"
         
         # If reconstructed.ply doesn't exist, try ANY ply
@@ -77,32 +80,32 @@ async def refine_model_endpoint(request: RefineRequest):
         if not render_result['success']:
             raise HTTPException(status_code=500, detail=f"Rendering failed: {render_result.get('error')}")
             
-        # 2. Enhance View (Diffusion)
-        logger.info("Enhancing render...")
-        # DiffusionService exposes enhance_views(); use it with a single view.
-        enhancement_results = await diffusion_service.enhance_views(
-            views={"default": str(render_output)},
-            prompt=request.prompt,
-            strength=request.intensity
-        )
-
-        # Extract the single enhancement result to keep the rest of the logic unchanged.
-        if enhancement_results:
-            # Assume enhance_views returns a mapping from view_id to per-view result dict.
-            enhancement_result = next(iter(enhancement_results.values()))
-        else:
-            enhancement_result = {"success": False, "error": "No enhancement results returned"}
-        
-        if not enhancement_result['success']:
-             raise HTTPException(status_code=500, detail=f"Enhancement failed: {enhancement_result.get('error')}")
-             
-        enhanced_image_path = enhancement_result['enhanced_path']
-        
-        # 3. Optimize Splats (Back-Projection)
-        logger.info("Optimizing splats...")
+        # Output dir for both the enhanced image and the refined splats.
         refine_output_dir = model_dir / "refined"
         refine_output_dir.mkdir(exist_ok=True)
-        
+
+        # 2. Enhance View (Diffusion)
+        logger.info("Enhancing render...")
+        # DiffusionService.enhance_views() returns a result dict:
+        #   {"success": bool, "enhanced_paths": {view_id: path}, "error": str?}
+        enhancement_result = await diffusion_service.enhance_views(
+            views_data={"default": str(render_output)},
+            depth_data={},
+            output_dir=str(refine_output_dir),
+            prompt=request.prompt,
+            strength=request.intensity,
+        )
+
+        if not enhancement_result.get('success'):
+            raise HTTPException(status_code=500, detail=f"Enhancement failed: {enhancement_result.get('error')}")
+
+        enhanced_image_path = enhancement_result.get('enhanced_paths', {}).get('default')
+        if not enhanced_image_path:
+            raise HTTPException(status_code=500, detail="Enhancement produced no output image")
+
+        # 3. Optimize Splats (Back-Projection)
+        logger.info("Optimizing splats...")
+
         training_data = {
             "image_path": enhanced_image_path,
             "iterations": request.iterations,

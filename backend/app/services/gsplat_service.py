@@ -15,6 +15,7 @@ from typing import Dict, List, Optional, Any, Tuple
 from pathlib import Path
 
 from ..core.logger import get_logger
+from ..core.config import settings
 
 logger = get_logger(__name__)
 
@@ -50,7 +51,6 @@ class GSplatService:
             # We assume ai_modules is in sys.path. 
             # If not, add it dynamically:
             import sys
-            from ..core.config import settings
             if str(settings.PROJECT_ROOT) not in sys.path:
                 sys.path.append(str(settings.PROJECT_ROOT))
 
@@ -133,7 +133,7 @@ class GSplatService:
                 cwd=str(script_path.parent),
                 capture_output=True,
                 text=True,
-                timeout=60  # 1 minute timeout
+                timeout=settings.RENDER_TIMEOUT  # 1 minute timeout
             )
 
             if result.returncode == 0 and Path(output_path).exists():
@@ -205,7 +205,7 @@ class GSplatService:
                 cwd=str(script_path.parent),
                 capture_output=True,
                 text=True,
-                timeout=1800  # 30 minute timeout for training
+                timeout=settings.GSPLAT_TRAIN_TIMEOUT  # 30 minute timeout for training
             )
 
             if result.returncode == 0:

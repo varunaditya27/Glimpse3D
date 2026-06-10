@@ -2,7 +2,7 @@
 import asyncio
 import os
 import gc
-from typing import Dict, Any, List
+from typing import Dict, Any, List, Optional
 import logging
 from pathlib import Path
 
@@ -24,19 +24,23 @@ class DiffusionService:
         self.service_instance = None
 
     async def enhance_views(
-        self, 
-        views_data: Dict[str, str], 
-        depth_data: Dict[str, str], 
-        output_dir: str
+        self,
+        views_data: Dict[str, str],
+        depth_data: Dict[str, str],
+        output_dir: str,
+        prompt: Optional[str] = None,
+        strength: Optional[float] = None,
     ) -> Dict[str, Any]:
         """
         Enhance generated views using SDXL Lightning + ControlNet (Depth).
-        
+
         Args:
             views_data: Dict mapping view IDs to image paths.
             depth_data: Dict mapping view IDs to depth map paths (.npy or .png).
             output_dir: Directory to save enhanced images.
-            
+            prompt: Optional override prompt for enhancement (uses default if None).
+            strength: Optional img2img denoising strength override (uses config if None).
+
         Returns:
             Dict containing:
             - success: bool
@@ -45,19 +49,21 @@ class DiffusionService:
         """
         try:
             self.logger.info(f"Starting diffusion enhancement for {len(views_data)} views")
-            
+
             os.makedirs(output_dir, exist_ok=True)
-            
+
             loop = asyncio.get_running_loop()
-            
+
             result = await loop.run_in_executor(
                 None,
                 self._run_inference_sync,
                 views_data,
                 depth_data,
-                output_dir
+                output_dir,
+                prompt,
+                strength
             )
-            
+
             return result
 
         except Exception as e:
@@ -69,10 +75,12 @@ class DiffusionService:
             }
 
     def _run_inference_sync(
-        self, 
-        views_data: Dict[str, str], 
-        depth_data: Dict[str, str], 
-        output_dir: str
+        self,
+        views_data: Dict[str, str],
+        depth_data: Dict[str, str],
+        output_dir: str,
+        prompt: Optional[str] = None,
+        strength: Optional[float] = None,
     ) -> Dict[str, Any]:
         """Synchronous wrapper for diffusion inference."""
         try:
@@ -110,11 +118,17 @@ class DiffusionService:
                         depth_map = np.array(depth_img).astype(np.float32) / 255.0
                 
                 # Enhance
-                # Use a specific prompt or default
+                # Use caller-provided prompt/strength when supplied, else sensible defaults.
+                effective_prompt = (
+                    prompt
+                    if prompt
+                    else "high quality 3D asset, detailed texture, studio lighting, 4k"
+                )
                 enhanced_img = self.service_instance.enhance(
                     image=image_path,
                     depth_map=depth_map,
-                    prompt="high quality 3D asset, detailed texture, studio lighting, 4k",
+                    prompt=effective_prompt,
+                    strength=strength,  # None falls back to EnhanceConfig.strength
                     # blend_with_original=True # Not directly in enhance(), meant for confidence wrapper
                 )
                 

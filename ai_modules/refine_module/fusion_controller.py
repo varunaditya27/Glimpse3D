@@ -232,15 +232,25 @@ class FusionController:
                 # 2. Check feature consistency
                 feature_mask = None
                 if self.config.enable_feature_check:
-                    feature_result = self.feature_checker.check(
-                        rendered, view.enhanced_image
-                    )
-                    feature_mask = feature_result.consistency_mask
-                    iteration_metrics['avg_feature_similarity'] += feature_result.similarity_score
-                    
-                    if not self.feature_checker.is_valid_update(feature_result):
-                        logger.warning(f"  View {view_idx} failed feature check, skipping")
-                        continue
+                    try:
+                        feature_result = self.feature_checker.check(
+                            rendered, view.enhanced_image
+                        )
+                        feature_mask = feature_result.consistency_mask
+                        iteration_metrics['avg_feature_similarity'] += feature_result.similarity_score
+
+                        if not self.feature_checker.is_valid_update(feature_result):
+                            logger.warning(f"  View {view_idx} failed feature check, skipping")
+                            continue
+                    except Exception as e:
+                        # Feature model unavailable (no network/weights) or input not
+                        # patch-divisible: degrade to depth + smoothing rather than
+                        # aborting the whole refinement.
+                        logger.warning(
+                            f"  Feature consistency check unavailable ({e}); "
+                            f"continuing without it for view {view_idx}"
+                        )
+                        feature_mask = None
                 
                 # 3. Combine masks
                 consistency_mask = self._combine_masks(depth_mask, feature_mask)
